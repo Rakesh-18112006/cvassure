@@ -339,9 +339,14 @@ def disposition_confusion(result, out_dir: Path, test_ids=None) -> Path:
             ax.text(j, i, f"{m[i, j]}\n{100 * m[i, j] / total:.1f}%", ha="center",
                     va="center", fontsize=12,
                     color="white" if m[i, j] > m.max() * 0.55 else "black")
-    ax.set_title("What we did with each image, against what it really was")
+    # The title sits over the axes, and the colorbar is added to the right of
+    # them — so a title wider than the axes runs underneath the colorbar and
+    # loses its last few words. Shorter title, and the colorbar gets its own
+    # padding rather than borrowing the title's space.
+    ax.set_title("What we did, against what was true", fontsize=13, pad=10)
     ax.grid(False)
-    fig.colorbar(im, ax=ax, label="images")
+    cbar = fig.colorbar(im, ax=ax, label="images", fraction=0.046, pad=0.06)
+    cbar.ax.tick_params(labelsize=10)
     return _save(fig, out_dir, "fig6_disposition_confusion")
 
 
