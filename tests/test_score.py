@@ -449,3 +449,57 @@ def test_silence_counts_as_a_prediction_of_clean(tmp_path):
         "cvassure.score.evaluate", fromlist=["_scores_for"]
     )._scores_for(result.joined)
     assert y.size == 200
+
+
+def test_the_combined_score_is_calibrated_not_just_each_detector(tmp_path):
+    """A maximum over several calibrated detectors is biased upward, so the
+    combination has to be calibrated as a quantity in its own right."""
+    rng = np.random.default_rng(0)
+    n, n_poisoned = 600, 120
+    samples, findings = [], []
+    for i in range(n):
+        sid = f"class_a/img_{i:04d}.png"
+        poisoned = i < n_poisoned
+        samples.append(
+            {"sample_id": sid, "is_poisoned": int(poisoned),
+             "attack_class": "ood_insertion" if poisoned else "clean",
+             "true_label": "a", "stored_label": "a", "contributor_id": f"C{i % 4}"}
+        )
+        # four independent detectors, each mediocre on its own
+        for det in ("ood", "label_noise", "trigger_freq", "near_duplicate"):
+            score = float(np.clip(rng.normal(0.35 + 0.25 * poisoned, 0.18), 0, 1))
+            findings.append(
+                Finding(
+                    asset_ref=sid, asset_type="sample", attack_class="ood_insertion",
+                    detector_id=det, access_tier=0, raw_score=score,
+                    severity="low", disposition="accept",
+                    reason=f"This image sits {1 + 9 * score:.1f} times further out "
+                           f"than a typical one.",
+                )
+            )
+    truth_dir = tmp_path / "truth"
+    truth_dir.mkdir(parents=True, exist_ok=True)
+    (truth_dir / "ground_truth.json").write_text(
+        json.dumps({"seed": 0, "attack_config": {}, "samples": samples})
+    )
+    findings_path = write_findings(findings, tmp_path / "findings.jsonl")
+
+    result = score_all(truth=truth_dir, findings=findings_path, out=tmp_path / "out",
+                       n_bootstrap=40, make_plots=False)
+    assert result.ece_after < result.ece_before
+    assert result.ece_after < 0.10, (
+        f"combined score is not calibrated: ECE {result.ece_after:.3f}"
+    )
+    assert result.system_calibrator is not None
+
+
+def test_the_reliability_plot_uses_the_same_score_as_the_reported_ece(tmp_path):
+    truth_dir, findings_path = _fake_run(tmp_path, n=500, n_poisoned=60)
+    result = score_all(truth=truth_dir, findings=findings_path, out=tmp_path / "out",
+                       n_bootstrap=40)
+    from cvassure.score.evaluate import _scores_for
+
+    y, s = _scores_for(result.joined, restrict_to=set(result.splits.test),
+                       use_calibrated=True)
+    s = result.system_calibrator.transform(s)
+    assert metrics.ece(y, s) == pytest.approx(result.ece_after, abs=1e-9)

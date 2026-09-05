@@ -122,6 +122,10 @@ def reliability(result, out_dir: Path, joined_raw=None, test_ids=None) -> Path:
         y, s = _scores_for(joined_raw, restrict_to=test_ids, use_calibrated=False)
         series.append(("before calibration", y, s, PALETTE[1], MARKERS[1]))
     y, s = _scores_for(result.joined, restrict_to=test_ids, use_calibrated=True)
+    # Apply the same final calibration the reported ECE uses, otherwise the
+    # picture and the number in RESULTS.md would quietly disagree.
+    if getattr(result, "system_calibrator", None) is not None:
+        s = result.system_calibrator.transform(s)
     series.append(("after calibration", y, s, PALETTE[0], MARKERS[0]))
 
     ax.plot([0, 1], [0, 1], color="grey", linestyle=":", linewidth=1.5,
@@ -255,7 +259,11 @@ def contributor_risk(result, out_dir: Path, threshold: float = 0.05) -> Path:
     ax.set_xticklabels(cids)
     ax.set_xlabel("contributor")
     ax.set_ylabel("share of images flagged")
-    ax.set_ylim(0, max(1.0, max([r.hi for r in risks] + true_rates) * 1.25))
+    # Scale to the data, not to 1.0: forcing full scale squashes every bar into
+    # the bottom fifth of the plot and hides exactly the differences this figure
+    # exists to show.
+    top = max([r.hi for r in risks] + true_rates + [threshold])
+    ax.set_ylim(0, min(1.0, top * 1.35))
     ax.set_title("Which source is the problem? (bars: what we found, stars: the truth)")
     ax.legend(frameon=False, loc="upper left")
     return _save(fig, out_dir, "fig4_contributor_risk")
@@ -271,7 +279,7 @@ def sweep(sweep_rows: Sequence[dict[str, Any]], out_dir: Path) -> Path:
 
     ``sweep_rows``: {attack_class, poison_rate, tpr_at_1pct, lo, hi}.
     """
-    fig, ax = plt.subplots(figsize=(7.6, 5.4))
+    fig, ax = plt.subplots(figsize=(9.2, 5.4))
     if not sweep_rows:
         _empty(fig, ax, "No sweep data yet — run experiments/run_all.py to fill "
                         "this in across poison rates.")
@@ -306,7 +314,9 @@ def sweep(sweep_rows: Sequence[dict[str, Any]], out_dir: Path) -> Path:
     ax.set_ylabel("poison caught at a 1% false-alarm budget")
     ax.set_ylim(0, 1.02)
     ax.set_title("How weak an attack can we still catch?")
-    ax.legend(frameon=False, loc="lower right")
+    # Outside the axes: the lines fill both the top and the bottom of this
+    # plot, so any in-axes placement sits on top of data.
+    ax.legend(frameon=False, loc="center left", bbox_to_anchor=(1.02, 0.5))
     return _save(fig, out_dir, "fig5_sweep")
 
 

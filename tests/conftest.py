@@ -2,6 +2,26 @@
 
 from __future__ import annotations
 
+import os
+
+# Set before torch is imported anywhere, which is why this sits above the other
+# imports and why the file cannot simply call torch.set_num_threads() later.
+#
+# PyTorch's OpenMP pool occasionally fails to tear down cleanly at interpreter
+# exit on macOS: the process aborts with "recursive_mutex lock failed" *after*
+# every test has already passed, and pytest returns 134. It reproduced about
+# once in four full runs. Nothing is wrong with the tests, but a build that
+# fails at random is worse than a slow one, and `make verify` is meant to be
+# run in front of an evaluator.
+#
+# Scoped to the test suite deliberately. Pinning costs about 45% of throughput,
+# and the abort has only ever been seen here, where a few hundred tests load
+# and drop TorchScript modules over and over; a single `cvassure audit` loads a
+# model once or twice, so it keeps the threads.
+os.environ.setdefault("OMP_NUM_THREADS", "1")
+os.environ.setdefault("MKL_NUM_THREADS", "1")
+os.environ.setdefault("KMP_DUPLICATE_LIB_OK", "TRUE")
+
 import json
 from pathlib import Path
 

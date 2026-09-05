@@ -109,58 +109,11 @@ def table4(rows: list[dict[str, Any]]):
 
 
 def table3(tamper_rows: list[dict[str, Any]]):
-    """Tamper detection. Every row should read 100%."""
-    from cvassure.score.tables import Table
+    """Tamper detection. Delegates to the one implementation in the package so
+    the results run and ``cvassure score all`` can never disagree about it."""
+    from cvassure.score.evaluate import table3_tamper
 
-    t = Table(
-        name="table3_tamper",
-        title="Table 3 — Tamper detection on the inference log",
-        columns=["attack type", "attempts", "detected", "rate",
-                 "named the right failure", "codes reported"],
-        notes=[
-            "This is cryptography, not statistics: the maths either matches or it "
-            "does not, so anything below 100% is a bug to fix, not a limitation to "
-            "report.",
-            "'named the right failure' checks that we blame the correct thing — a "
-            "system that spots tampering but misattributes it is little use to an "
-            "investigator.",
-            "The 'clean' row is the control: an untouched log must verify, otherwise "
-            "every row above it is meaningless.",
-        ],
-    )
-    grouped: dict[str, list[dict]] = defaultdict(list)
-    for r in tamper_rows:
-        grouped[r["attack_class"]].append(r)
-
-    for kind in sorted(grouped, key=lambda k: (k == "clean", k)):
-        group = grouped[kind]
-        codes = sorted({c for g in group for c in g.get("codes", [])})
-        if kind == "clean":
-            passed = sum(1 for g in group if g.get("correct_code"))
-            t.add(
-                **{
-                    "attack type": "clean (control — nothing was touched)",
-                    "attempts": len(group),
-                    "detected": "n/a",
-                    "rate": f"{100 * passed / max(1, len(group)):.1f}% verified clean",
-                    "named the right failure": "n/a",
-                    "codes reported": ", ".join(codes) or "none",
-                }
-            )
-            continue
-        detected = sum(1 for g in group if g.get("detected"))
-        correct = sum(1 for g in group if g.get("correct_code"))
-        t.add(
-            **{
-                "attack type": kind,
-                "attempts": len(group),
-                "detected": detected,
-                "rate": f"{100 * detected / max(1, len(group)):.1f}%",
-                "named the right failure": f"{100 * correct / max(1, len(group)):.1f}%",
-                "codes reported": ", ".join(codes) or "—",
-            }
-        )
-    return t
+    return table3_tamper(tamper_rows)
 
 
 def sweep_rows_for_plot(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -291,6 +244,62 @@ def coverage_md(rows: list[dict[str, Any]],
     return "\n".join(lines) + "\n"
 
 
+def _render_remaining_figures(rows: list[dict[str, Any]], out_dir: Path) -> None:
+    """Produce the five figures that need findings joined to their answer key.
+
+    Uses one representative cell — the mixed attack at a middling poison rate,
+    which is what a contaminated intake actually looks like — rather than
+    averaging incomparable runs together. Silently skipped if the sweep was run
+    by an older version that did not keep its findings.
+    """
+    candidates = [
+        r for r in rows
+        if r.get("cell_dir")
+        and Path(r["cell_dir"], "findings.jsonl").exists()
+        and Path(r["cell_dir"], "truth", "ground_truth.json").exists()
+    ]
+    if not candidates:
+        print("  (no per-cell findings on disk — skipping the joined figures; "
+              "re-run experiments/run_all.py to produce them)")
+        return
+
+    def rank(r):
+        return (abs(r["poison_rate"] - 0.05), r["attack"] != "ood_insertion", r["seed"])
+
+    pick = sorted(candidates, key=rank)[0]
+    cell = Path(pick["cell_dir"])
+    print(f"  representative cell for the joined figures: {pick['attack']} at "
+          f"{100 * pick['poison_rate']:.0f}% poison, seed {pick['seed']}")
+
+    from cvassure.score.evaluate import score_all
+
+    result = score_all(
+        truth=cell / "truth",
+        findings=cell / "findings.jsonl",
+        out=out_dir / "representative",
+        n_bootstrap=300,
+        seed=pick["seed"],
+    )
+    import shutil
+
+    # Copy only the five that need the join. Figures 5 and 7 are properties of
+    # the whole sweep, and the representative cell renders them from a single
+    # run — copying those over would replace the most important figure in the
+    # project with an empty placeholder.
+    joined_figures = (
+        "fig1_roc_by_attack",
+        "fig2_reliability",
+        "fig3_score_histograms",
+        "fig4_contributor_risk",
+        "fig6_disposition_confusion",
+    )
+    for src in sorted((out_dir / "representative" / "plots").glob("*")):
+        if src.stem in joined_figures:
+            shutil.copy2(src, out_dir / "plots" / src.name)
+    print(f"  calibration error {result.ece_before:.3f} before, "
+          f"{result.ece_after:.3f} after")
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--out", default=str(REPO / "results"))
@@ -330,6 +339,7 @@ def main(argv: list[str] | None = None) -> int:
     from cvassure.score import plots
 
     plots.sweep(sweep, out_dir / "plots")
+    _render_remaining_figures(rows, out_dir)
     plots.runtime_scaling(
         [{"module": m, "n_samples": r["n"], "seconds": s}
          for r in rows for m, s in (r.get("per_detector_seconds") or {}).items()],
@@ -358,6 +368,11 @@ def main(argv: list[str] | None = None) -> int:
         "",
         "- `plots/fig5_sweep.png` — detection rate against poison rate. The most "
         "important figure: it answers *how weak an attack can you still catch?*",
+        "- `plots/fig1_roc_by_attack.png` — ROC per attack, overlaid by access tier.",
+        "- `plots/fig2_reliability.png` — calibration, before and after.",
+        "- `plots/fig3_score_histograms.png` — where clean and poisoned images land.",
+        "- `plots/fig4_contributor_risk.png` — contributor risk with credible intervals.",
+        "- `plots/fig6_disposition_confusion.png` — what we did against what was true.",
         "- `plots/fig7_runtime.png` — runtime scaling.",
         "",
         "See `COVERAGE.md` for what this system does and does not detect.",

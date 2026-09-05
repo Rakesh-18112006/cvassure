@@ -11,12 +11,10 @@ import datetime as _dt
 import json
 import sys
 import time
-from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Sequence
 
 from cvassure.core.hashing import file_digest, sha256_hex
-from cvassure.core.schemas import Finding, disposition_for, severity_for
+from cvassure.core.schemas import Finding
 from cvassure.detect import data as data_suite
 from cvassure.detect import model as model_suite
 from cvassure.detect.base import AuditContext, DetectorResult
@@ -52,20 +50,6 @@ class Progress:
         if not self.quiet:
             sys.stdout.write("\r" + " " * 78 + "\r")
             sys.stdout.flush()
-
-
-@dataclass
-class AuditOutcome:
-    findings: list[Finding]
-    results: list[DetectorResult]
-    verdict: Any
-    coverage: Any
-    report_path: Path
-    findings_path: Path
-    audit_log_path: Path
-    out_dir: Path
-    timings: list[dict[str, Any]] = field(default_factory=list)
-    limitations: list[str] = field(default_factory=list)
 
 
 def run_audit(args) -> int:
@@ -285,31 +269,3 @@ def _verify_receipts(args, ctx, log, input_digests) -> list[Finding]:
         started=started,
     )
     return findings
-
-
-def recalibrate_dispositions(
-    findings: Sequence[Finding], calibrated: Sequence[Finding]
-) -> list[Finding]:
-    """Re-derive severity and disposition from the calibrated score.
-
-    A detector has to pick a disposition before anybody has calibrated
-    anything, so it grades on its own raw scale. Once a calibrated probability
-    exists, that is the number the thresholds should be read against —
-    otherwise 'quarantine' means something slightly different for every check
-    in the report.
-    """
-    out = []
-    for f in calibrated:
-        if f.is_unavailable or f.calibrated_score is None:
-            out.append(f)
-            continue
-        from dataclasses import replace
-
-        out.append(
-            replace(
-                f,
-                severity=severity_for(f.calibrated_score),
-                disposition=disposition_for(f.calibrated_score),
-            )
-        )
-    return out

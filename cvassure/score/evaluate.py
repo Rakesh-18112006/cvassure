@@ -310,33 +310,62 @@ def contributor_disposition(risk: metrics.ContributorRisk) -> str:
 # --------------------------------------------------------------------------
 
 
-def table3_tamper(truth: dict[str, Any], results: Sequence[dict[str, Any]]) -> Table:
-    """``results`` is one entry per attempted receipt attack, each recording
-    whether verification caught it and with which code."""
+def table3_tamper(tamper_rows: Sequence[dict[str, Any]]) -> Table:
+    """Tamper detection on the inference log. Every row should read 100%.
+
+    ``tamper_rows`` is one entry per attempted attack:
+    ``{attack_class, detected, correct_code, codes}``. A row with
+    ``attack_class="clean"`` is the control — an untouched log that must
+    verify, because without it a table of 100%s proves only that the verifier
+    says no to everything.
+    """
     t = Table(
         name="table3_tamper",
         title="Table 3 — Tamper detection on the inference log",
-        columns=["attack_type", "attempts", "detected", "rate", "codes_reported"],
+        columns=["attack type", "attempts", "detected", "rate",
+                 "named the right failure", "codes reported"],
         notes=[
             "This is cryptography, not statistics: the maths either matches or it "
-            "does not, so anything below 100% is a bug to fix, not a limitation "
-            "to report.",
+            "does not, so anything below 100% is a bug to fix, not a limitation to "
+            "report.",
+            "'named the right failure' checks that we blame the correct thing — a "
+            "system that spots tampering but misattributes it is little use to an "
+            "investigator.",
+            "The 'clean' row is the control: an untouched log must verify, otherwise "
+            "every row above it is meaningless.",
         ],
     )
-    by_kind: dict[str, list[dict[str, Any]]] = defaultdict(list)
-    for r in results:
-        by_kind[r["attack_class"]].append(r)
+    grouped: dict[str, list[dict[str, Any]]] = defaultdict(list)
+    for r in tamper_rows:
+        grouped[r["attack_class"]].append(r)
 
-    for kind in sorted(by_kind):
-        entries = by_kind[kind]
-        detected = sum(1 for e in entries if e.get("detected"))
-        codes = sorted({c for e in entries for c in e.get("codes", [])})
+    for kind in sorted(grouped, key=lambda k: (k == "clean", k)):
+        group = grouped[kind]
+        codes = sorted({c for g in group for c in g.get("codes", [])})
+        if kind == "clean":
+            passed = sum(1 for g in group if g.get("correct_code"))
+            t.add(
+                **{
+                    "attack type": "clean (control — nothing was touched)",
+                    "attempts": len(group),
+                    "detected": "n/a",
+                    "rate": f"{100 * passed / max(1, len(group)):.1f}% verified clean",
+                    "named the right failure": "n/a",
+                    "codes reported": ", ".join(codes) or "none",
+                }
+            )
+            continue
+        detected = sum(1 for g in group if g.get("detected"))
+        correct = sum(1 for g in group if g.get("correct_code"))
         t.add(
-            attack_type=kind,
-            attempts=len(entries),
-            detected=detected,
-            rate=f"{100 * detected / max(1, len(entries)):.1f}%",
-            codes_reported=", ".join(codes) or "—",
+            **{
+                "attack type": kind,
+                "attempts": len(group),
+                "detected": detected,
+                "rate": f"{100 * detected / max(1, len(group)):.1f}%",
+                "named the right failure": f"{100 * correct / max(1, len(group)):.1f}%",
+                "codes reported": ", ".join(codes) or "—",
+            }
         )
     return t
 
@@ -410,6 +439,7 @@ class ScoreResult:
     plots: dict[str, Path] = field(default_factory=dict)
     ece_before: float = float("nan")
     ece_after: float = float("nan")
+    system_calibrator: Any | None = None
 
 
 def score_all(
@@ -442,16 +472,30 @@ def score_all(
     joined_raw = join(truth_data, raw_findings)
     joined.findings = calibrated
 
+    # One more calibration pass, over the combined per-sample score.
+    #
+    # Calibrating each detector separately is necessary but not sufficient:
+    # a sample's system score is the *maximum* over detectors, and a maximum
+    # of several well-calibrated probabilities is not itself calibrated — it
+    # is biased upward, because the most enthusiastic of several checks wins
+    # every time. Left uncorrected the headline ECE stays high even though
+    # every individual detector is honest. So the combination is fitted as a
+    # quantity in its own right, on the calibration split it has never been
+    # scored against.
+    system = _fit_system_calibrator(joined, labels, splits)
+
     y_before, s_before = _scores_for(joined_raw, restrict_to=test_ids, use_calibrated=False)
     y_after, s_after = _scores_for(joined, restrict_to=test_ids, use_calibrated=True)
+    s_after = system.transform(s_after)
     ece_before = metrics.ece(y_before, s_before)
     ece_after = metrics.ece(y_after, s_after)
+    calibrators = {**calibrators, "_system": system}
 
     # -- tables ----------------------------------------------------------
     tables = [
         table1_detection(joined, test_ids=test_ids, n_bootstrap=n_bootstrap, seed=seed),
         table2_contributors(joined),
-        table3_tamper(truth_data, tamper_results or _tamper_from_truth(truth_data)),
+        table3_tamper(tamper_results or _tamper_from_truth(truth_data)),
         table4_runtime(timings or []),
     ]
     for t in tables:
@@ -465,6 +509,7 @@ def score_all(
         out_dir=out_dir,
         ece_before=ece_before,
         ece_after=ece_after,
+        system_calibrator=system,
     )
 
     if make_plots:
@@ -476,11 +521,24 @@ def score_all(
     return result
 
 
+def _fit_system_calibrator(joined: Joined, labels: dict[str, int], splits: Splits):
+    """Fit the final calibrator on the combined score, using only the
+    calibration split."""
+    from cvassure.score.calibrate import IsotonicCalibrator
+
+    cal_ids = set(splits.calibrate)
+    y, s = _scores_for(joined, restrict_to=cal_ids, use_calibrated=True)
+    return IsotonicCalibrator().fit(s, y)
+
+
 def _tamper_from_truth(truth: dict[str, Any]) -> list[dict[str, Any]]:
-    """If the caller did not run the receipt attacks, report zero attempts
-    rather than an empty table with no explanation."""
+    """If the caller did not verify the receipt log, report the attempts as
+    undetected rather than leaving an empty table with no explanation. A blank
+    row would read as "nothing to worry about"; an explicit zero reads as
+    "this was not checked", which is the truth."""
     return [
-        {"attack_class": r["attack_class"], "detected": False, "codes": []}
+        {"attack_class": r["attack_class"], "detected": False, "correct_code": False,
+         "codes": []}
         for r in truth.get("receipt_attacks", [])
     ]
 

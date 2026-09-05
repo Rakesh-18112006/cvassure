@@ -550,3 +550,22 @@ def test_table3_reports_a_hundred_percent(tmp_path):
     assert len(attack_rows) == 4
     assert all(r["rate"] == "100.0%" for r in attack_rows)
     assert all(r["named the right failure"] == "100.0%" for r in attack_rows)
+
+
+def test_the_sweep_figure_is_not_overwritten_by_the_representative_cell(tmp_path):
+    """Figures 5 and 7 describe the whole sweep. A single representative cell
+    renders them empty, and copying those over would blank the most important
+    figure in the project."""
+    import sys
+
+    sys.path.insert(0, str(__import__("pathlib").Path(__file__).resolve().parents[1]
+                          / "experiments"))
+    import aggregate
+    import inspect as _inspect
+
+    source = _inspect.getsource(aggregate._render_remaining_figures)
+    assert "fig5_sweep" not in source, (
+        "the representative cell must not be allowed to write fig5_sweep"
+    )
+    assert "fig7_runtime" not in source
+    assert "joined_figures" in source

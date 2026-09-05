@@ -140,6 +140,15 @@ def run_cell(cell: dict[str, Any], workdir: Path, model_path: Path | None,
     findings, results = data_suite.run_all(ctx)
     seconds = time.perf_counter() - started
 
+    # Keep the findings next to their answer key. Five of the seven figures
+    # (ROC panels, reliability, score histograms, contributor risk, the
+    # disposition confusion matrix) need both sides of the join, and throwing
+    # the findings away here would mean the results run could only ever produce
+    # the other two.
+    from cvassure.score.evaluate import write_findings
+
+    write_findings(findings, cell_dir / "findings.jsonl")
+
     labels = {r["sample_id"]: r["is_poisoned"] for r in truth["samples"]}
     best = {sid: 0.0 for sid in labels}
     for f in findings:
@@ -170,6 +179,7 @@ def run_cell(cell: dict[str, Any], workdir: Path, model_path: Path | None,
         "per_detector_seconds": {r.detector_id: round(r.seconds, 4) for r in results},
         "peak_ram_mb": max((r.peak_ram_mb for r in results), default=0.0),
         "errors": [r.detector_id for r in results if r.error],
+        "cell_dir": str(cell_dir),
     }
 
 
