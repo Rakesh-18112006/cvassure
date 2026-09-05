@@ -1,0 +1,8 @@
+# Pixels untouched, labels wrong. Nothing that looks at images can catch this;
+# only agreement between an image and its neighbours can.
+name: label_flip_10pct
+seed: 4
+contributors: { n: 5, poison_concentration: 0.8 }
+attacks:
+  - type: label_flip
+    rate: 0.10

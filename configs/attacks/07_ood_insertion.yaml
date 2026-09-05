@@ -1,0 +1,8 @@
+# Images from a completely different domain filed under real class names.
+name: ood_insertion
+seed: 7
+contributors: { n: 5, poison_concentration: 0.8 }
+attacks:
+  - type: ood_insertion
+    other_dir: data/ood_pool
+    count: 30

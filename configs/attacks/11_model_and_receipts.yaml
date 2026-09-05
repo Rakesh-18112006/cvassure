@@ -1,0 +1,18 @@
+# Attacks on the model file and the inference log rather than on the data.
+# Run with --model and --receipts.
+name: model_and_receipts
+seed: 11
+contributors: { n: 5, poison_concentration: 0.8 }
+attacks: []
+model_attacks:
+  - type: substitute
+    other_model_path: models/impostor.onnx
+receipt_attacks:
+  - type: alter_field
+    index: 346
+  - type: replay_receipt
+    index: 12
+  - type: delete_receipt
+    index: 200
+  - type: reorder
+    index: 90

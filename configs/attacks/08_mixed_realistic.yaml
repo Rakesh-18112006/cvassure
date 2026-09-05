@@ -1,0 +1,17 @@
+# What a contaminated intake actually looks like: several small problems at
+# once, most of them from the same source. This is the demo config.
+name: mixed_realistic
+seed: 8
+contributors: { n: 5, poison_concentration: 0.85, bad_contributor: C3 }
+attacks:
+  - type: badnets_patch
+    rate: 0.03
+    size: 5
+  - type: label_flip
+    rate: 0.04
+  - type: near_duplicate_flood
+    n_seeds: 4
+    n_copies: 8
+  - type: ood_insertion
+    other_dir: data/ood_pool
+    count: 15

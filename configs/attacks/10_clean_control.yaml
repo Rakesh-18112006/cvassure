@@ -1,0 +1,6 @@
+# The control. Nothing is touched. Every detector must stay quiet here, and
+# this is the run that produces the false-alarm rate quoted in the tables.
+name: clean_control
+seed: 10
+contributors: { n: 5, poison_concentration: 0.0 }
+attacks: []

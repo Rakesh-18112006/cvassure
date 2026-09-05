@@ -1,0 +1,10 @@
+# A checkerboard laid over the whole image at 8% strength — invisible to the
+# eye, and much harder than a patch because there is no localised artefact.
+name: blended_faint
+seed: 3
+contributors: { n: 5, poison_concentration: 0.8 }
+attacks:
+  - type: blended_trigger
+    rate: 0.05
+    pattern: checkerboard
+    alpha: 0.08

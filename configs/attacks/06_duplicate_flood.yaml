@@ -1,0 +1,9 @@
+# Eight source photos, twelve variants each: rotated, cropped, re-lit.
+# Inflates a contributor's apparent volume and skews whatever trains on it.
+name: duplicate_flood
+seed: 6
+contributors: { n: 5, poison_concentration: 0.85 }
+attacks:
+  - type: near_duplicate_flood
+    n_seeds: 8
+    n_copies: 12

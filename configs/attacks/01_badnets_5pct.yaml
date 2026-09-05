@@ -1,0 +1,11 @@
+# A small white square pasted into the corner of 5% of the images.
+# The easiest attack to see and the baseline every other row is compared to.
+name: badnets_5pct
+seed: 1
+contributors: { n: 5, poison_concentration: 0.8 }
+attacks:
+  - type: badnets_patch
+    rate: 0.05
+    size: 6
+    colour: [255, 255, 255]
+    position: bottom_right

@@ -1,0 +1,14 @@
+# No attack at all — just fog and sensor noise. A system that calls this an
+# attack is useless in the field, so this config exists to prove we do not.
+name: benign_shift
+seed: 9
+contributors: { n: 5, poison_concentration: 0.5 }
+attacks:
+  - type: distribution_shift
+    rate: 0.35
+    kind: fog
+    severity: 0.6
+  - type: distribution_shift
+    rate: 0.20
+    kind: sensor_noise
+    severity: 0.5

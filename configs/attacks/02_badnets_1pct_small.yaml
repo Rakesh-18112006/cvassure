@@ -1,0 +1,11 @@
+# The same trigger, but a third the size and a fifth as common.
+# This is the row that shows where the detector starts to lose.
+name: badnets_1pct_small
+seed: 2
+contributors: { n: 5, poison_concentration: 0.8 }
+attacks:
+  - type: badnets_patch
+    rate: 0.01
+    size: 3
+    colour: [200, 200, 200]
+    position: random

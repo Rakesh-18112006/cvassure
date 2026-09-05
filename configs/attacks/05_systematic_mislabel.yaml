@@ -1,0 +1,10 @@
+# One contributor labels every truck as a car, consistently. This is the case
+# where naming the source matters far more than naming the images.
+name: systematic_mislabel
+seed: 5
+contributors: { n: 5, poison_concentration: 0.9, bad_contributor: C4 }
+attacks:
+  - type: systematic_mislabel
+    contributor_id: C4
+    rate: 0.6
+    mapping: { truck: car, ship: aircraft }

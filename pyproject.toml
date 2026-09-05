@@ -1,0 +1,24 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "cvassure"
+version = "0.1.0"
+description = "Trustworthy computer-vision integrity assurance for multi-contributor pipelines (SIH 2026, PS 26228)"
+requires-python = ">=3.11"
+dependencies = [
+  "numpy", "scipy", "pillow", "scikit-learn", "matplotlib",
+  "onnxruntime", "torch", "cryptography", "ImageHash", "pyyaml", "jinja2",
+]
+
+[project.scripts]
+cvassure = "cvassure.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["cvassure*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
+filterwarnings = ["ignore::DeprecationWarning"]
