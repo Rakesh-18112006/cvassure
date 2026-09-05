@@ -41,14 +41,27 @@ section{background:var(--panel);border:1px solid var(--line);border-radius:10px;
   padding:22px 24px;margin:20px 0}
 section > h3{margin:0 0 6px;font-size:21px}
 section > .lead{color:var(--muted);margin:0 0 16px;font-size:15px}
-table{border-collapse:collapse;width:100%;font-size:14.5px}
+/* min-width is the sum of what the columns actually need — a filename column,
+   four value columns and a 340px column of prose — so a narrow window scrolls
+   the table sideways instead of crushing every column at once. */
+table{border-collapse:collapse;width:100%;min-width:940px;font-size:14.5px}
 th,td{text-align:left;padding:9px 11px;border-bottom:1px solid var(--line);
   vertical-align:top}
 th{background:#f0efe9;font-weight:600;cursor:pointer;user-select:none;white-space:nowrap}
 th:hover{background:#e7e5dd}
 th::after{content:"  \\2195";color:#aaa;font-size:11px}
 tbody tr:hover{background:#faf9f5}
-.scroll{overflow-x:auto}
+/* The explanation column is the one people read, so it gets the slack. The
+   value columns beside it stay narrow and never wrap mid-word; long filenames
+   break rather than forcing the column wide. */
+td.prose,th.prose{width:40%;min-width:340px;line-height:1.5}
+td.narrow,th.narrow{min-width:92px}
+/* The first column is an identifier — a filename or a contributor id. Give it
+   enough room that it does not wrap one character at a time, and let it break
+   inside a long path rather than widening the whole table. */
+td:first-child,th:first-child{min-width:150px}
+td:first-child{overflow-wrap:anywhere}
+.scroll{overflow-x:auto;-webkit-overflow-scrolling:touch}
 .pill{display:inline-block;padding:2px 9px;border-radius:999px;font-size:12.5px;
   font-weight:600;white-space:nowrap}
 .pill.accept{background:#e3f3ea;color:var(--green)}
@@ -118,14 +131,43 @@ def _pill(value: str) -> str:
     return f'<span class="pill {esc(cls)}">{esc(value)}</span>'
 
 
+#: Column headings whose content is a sentence rather than a value. These need
+#: room; the short columns beside them do not.
+PROSE_COLUMNS = frozenset(
+    {"why", "what we found", "note", "reason", "measured"}
+)
+
+
 def _table(columns: Sequence[str], rows: Sequence[Sequence[str]], pill_cols=()) -> str:
-    head = "".join(f"<th>{esc(c)}</th>" for c in columns)
+    """Render a table that gives its prose column room to breathe.
+
+    Without this, the browser's automatic column sizing squeezes the
+    explanation column — the one an analyst actually reads — down to a narrow
+    strip, wraps one sentence over fifteen lines, and leaves a tall empty band
+    beside it where the short columns sit top-aligned. The prose column is
+    marked so CSS can give it a floor, and the table is allowed to scroll
+    sideways rather than being compressed to fit.
+    """
+    prose = {i for i, c in enumerate(columns) if str(c).strip().lower() in PROSE_COLUMNS}
+    # If nothing matched by name, fall back to the widest column by content:
+    # a table with a long free-text column and no recognised heading should
+    # still lay out sensibly.
+    if not prose and rows:
+        widths = [max(len(str(r[i])) for r in rows) for i in range(len(columns))]
+        if widths and max(widths) > 60:
+            prose = {widths.index(max(widths))}
+
+    head = "".join(
+        f'<th class="{"prose" if i in prose else "narrow"}">{esc(c)}</th>'
+        for i, c in enumerate(columns)
+    )
     body = []
     for row in rows:
         cells = []
         for i, value in enumerate(row):
+            cls = "prose" if i in prose else "narrow"
             cells.append(
-                f"<td>{_pill(value) if i in pill_cols else esc(value)}</td>"
+                f'<td class="{cls}">{_pill(value) if i in pill_cols else esc(value)}</td>'
             )
         body.append("<tr>" + "".join(cells) + "</tr>")
     return (

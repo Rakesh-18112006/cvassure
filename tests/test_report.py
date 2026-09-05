@@ -569,3 +569,49 @@ def test_the_sweep_figure_is_not_overwritten_by_the_representative_cell(tmp_path
     )
     assert "fig7_runtime" not in source
     assert "joined_figures" in source
+
+
+# --------------------------------------------------------------------------
+# table layout — the explanation column must not be crushed
+# --------------------------------------------------------------------------
+
+
+def test_the_explanation_column_is_marked_so_css_can_give_it_room():
+    """Without this the browser squeezes the 'why' column to a strip, wraps one
+    sentence over fifteen lines, and leaves a tall blank band beside it."""
+    html = report_html._table(
+        ["image", "check", "score", "why"],
+        [["a.png", "ood", "0.9", "This image is 11 times further away than usual."]],
+    )
+    assert '<td class="prose">This image is 11 times' in html
+    assert '<th class="prose">why</th>' in html
+    assert '<td class="narrow">a.png</td>' in html
+
+
+@pytest.mark.parametrize("heading", ["why", "what we found", "note", "Why", "  NOTE "])
+def test_known_prose_headings_are_recognised(heading):
+    html = report_html._table([heading, "score"], [["some long sentence here", "0.9"]])
+    assert f'<th class="prose">{report_html.esc(heading)}</th>' in html
+
+
+def test_an_unnamed_free_text_column_is_still_given_room():
+    """A table whose long column has an unrecognised heading must still lay out
+    sensibly rather than falling back to equal widths."""
+    long_text = "x" * 120
+    html = report_html._table(["id", "commentary"], [["a", long_text]])
+    assert f'<td class="prose">{long_text}</td>' in html
+
+
+def test_short_tables_do_not_get_a_prose_column():
+    html = report_html._table(["a", "b"], [["1", "2"], ["3", "4"]])
+    assert "prose" not in html
+
+
+def test_the_stylesheet_lets_tables_scroll_instead_of_crushing_columns():
+    css = report_html.CSS
+    assert "min-width:940px" in css, "the table must be allowed to exceed a narrow window"
+    assert "overflow-x:auto" in css, "and the container must scroll when it does"
+    assert "td.prose" in css and "min-width:340px" in css
+    assert "td:first-child{overflow-wrap:anywhere}" in css, (
+        "long filenames must break rather than widening the whole table"
+    )
