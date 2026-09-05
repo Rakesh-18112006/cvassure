@@ -66,7 +66,8 @@ def run(
             print(f"  file digest     {d['file_digest'][:32]}…")
             print(f"  access granted  tier {access_tier} — {TIER_NAMES[access_tier]}")
         except Exception as exc:  # a judge's model must never crash the tool
-            print(f"  could not load this model: {exc}")
+            print(f"  could not load this model: "
+                  f"{getattr(exc, 'plain_english', exc)}")
             print("  the audit will continue with the data checks only")
 
     print()

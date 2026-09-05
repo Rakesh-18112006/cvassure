@@ -228,3 +228,87 @@ def test_inspect_with_a_broken_model_file_does_not_crash(synth_root, tmp_path, c
     bad.write_bytes(b"this is not a model")
     assert main(["ingest", "inspect", "--dataset", str(synth_root), "--model", str(bad)]) == 0
     assert "could not load this model" in capsys.readouterr().out
+
+
+# -- PS 2.2.6: "PyTorch/TorchScript" means more than one file format --------
+
+
+def _toy_module(seed=3):
+    from cvassure.datasets import toy_model
+
+    m = toy_model.build_module(seed=seed)
+    m.eval()
+    return m
+
+
+def test_a_pickled_nn_module_is_loadable(tmp_path):
+    """torch.save(model) is what most people mean by 'a PyTorch model'. It is
+    not a TorchScript archive, and torch.jit.load fails on it obscurely."""
+    import torch
+
+    path = tmp_path / "plain.pt"
+    torch.save(_toy_module(), path)
+
+    m = load_model(path, access_tier=2)
+    assert "PyTorch" in m.kind
+    assert m.predict(probe_batch(2, (3, 64, 64))).shape == (2, 10)
+    assert m.weights()
+    assert m.activations(probe_batch(2, (3, 64, 64))).ndim == 2
+
+
+def test_a_pickled_module_still_respects_the_declared_tier(tmp_path):
+    import torch
+
+    path = tmp_path / "plain.pt"
+    torch.save(_toy_module(), path)
+    m = load_model(path, access_tier=0)
+    with pytest.raises(AccessDenied):
+        m.weights()
+
+
+def test_a_state_dict_is_refused_in_plain_english(tmp_path):
+    """Weights without the architecture cannot be run. Say so, rather than
+    failing with an internal message about a missing constants.pkl."""
+    import torch
+
+    from cvassure.ingest.models import UnusableModel
+
+    path = tmp_path / "sd.pth"
+    torch.save(_toy_module().state_dict(), path)
+
+    with pytest.raises(UnusableModel) as exc:
+        load_model(path, access_tier=1)
+    plain = exc.value.plain_english
+    assert "weights but not its architecture" in plain
+    assert "constants.pkl" not in plain
+
+
+def test_a_junk_file_named_pt_is_refused_in_plain_english(tmp_path):
+    from cvassure.ingest.models import UnusableModel
+
+    path = tmp_path / "notamodel.pt"
+    path.write_bytes(b"this is not a model at all")
+    with pytest.raises(UnusableModel) as exc:
+        load_model(path, access_tier=0)
+    assert "not a model we can read" in exc.value.plain_english
+
+
+def test_the_audit_survives_a_state_dict_without_crashing(tmp_path, synth_root, capsys):
+    """A judge handing over the wrong PyTorch artefact must get a sentence, not
+    a stack trace, and the data checks must still run."""
+    import torch
+    from argparse import Namespace
+
+    from cvassure.pipeline import run_audit
+
+    path = tmp_path / "sd.pth"
+    torch.save(_toy_module().state_dict(), path)
+    rc = run_audit(Namespace(
+        dataset=str(synth_root), model=str(path), access_tier=1, receipts=None,
+        pubkey="keys/pub.pem", reference=None, enrolled_fingerprint=None,
+        format="auto", contributors=None, contributor_from_path=None,
+        out=str(tmp_path / "out"), seed=0, quiet=True))
+    assert rc in (0, 2)
+    out = capsys.readouterr().out
+    assert "weights but not its architecture" in out
+    assert (tmp_path / "out" / "report.html").exists()

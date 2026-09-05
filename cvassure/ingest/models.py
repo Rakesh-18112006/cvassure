@@ -284,6 +284,18 @@ class OnnxModel(ModelHandle):
         return arr.reshape(arr.shape[0], -1)
 
 
+class UnusableModel(ValueError):
+    """The file is a recognised PyTorch artefact that cannot be run on its own.
+
+    Carries a plain-English explanation, because PS clause 2.2.6 requires the
+    system to report clearly rather than fail obscurely.
+    """
+
+    def __init__(self, message: str, plain_english: str):
+        super().__init__(message)
+        self.plain_english = plain_english
+
+
 class TorchScriptModel(ModelHandle):
     native_tier = 2
     kind = "TorchScript"
@@ -293,8 +305,58 @@ class TorchScriptModel(ModelHandle):
         import torch
 
         self._torch = torch
-        self._module = torch.jit.load(str(self.path), map_location="cpu")
+        self._module = self._load(torch)
         self._module.eval()
+
+    def _load(self, torch):
+        """Accept both things people mean by "a PyTorch model".
+
+        `torch.jit.save` writes a TorchScript archive; `torch.save(model)`
+        pickles an ``nn.Module``; `torch.save(model.state_dict())` pickles a
+        plain dict of tensors. All three arrive with a .pt or .pth extension
+        and only the first can be read by ``torch.jit.load`` — which fails on
+        the others with an internal message about a missing constants.pkl.
+        That is precisely the obscure failure clause 2.2.6 tells us not to
+        produce, so each case is handled and named.
+        """
+        try:
+            module = torch.jit.load(str(self.path), map_location="cpu")
+            self.kind = "TorchScript"
+            return module
+        except Exception:
+            pass
+
+        try:
+            obj = torch.load(str(self.path), map_location="cpu", weights_only=False)
+        except Exception as exc:
+            raise UnusableModel(
+                f"{self.path} is not a readable PyTorch or TorchScript file: {exc}",
+                "This file is not a model we can read. It is neither a TorchScript "
+                "archive nor a saved PyTorch model.",
+            ) from exc
+
+        if isinstance(obj, torch.nn.Module):
+            self.kind = "PyTorch (pickled nn.Module)"
+            return obj
+
+        # A bare state_dict is weights without the architecture that gives them
+        # meaning: we can digest and describe it, but we cannot run it.
+        if isinstance(obj, dict) and obj and all(
+            torch.is_tensor(v) for v in obj.values()
+        ):
+            raise UnusableModel(
+                f"{self.path} contains a state_dict, not a runnable model",
+                "This file holds the model's weights but not its architecture, so "
+                "nothing can be run against it. The checks that read weights can "
+                "still be done; the ones that ask the model questions cannot. "
+                "Re-save it with torch.jit.save, or supply the code that builds "
+                "the network.",
+            )
+
+        raise UnusableModel(
+            f"{self.path} unpickled to {type(obj).__name__}, not a model",
+            "This file is a PyTorch file, but what is inside it is not a model.",
+        )
 
     def _predict(self, batch: np.ndarray) -> np.ndarray:
         torch = self._torch

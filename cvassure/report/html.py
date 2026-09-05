@@ -134,7 +134,8 @@ def _pill(value: str) -> str:
 #: Column headings whose content is a sentence rather than a value. These need
 #: room; the short columns beside them do not.
 PROSE_COLUMNS = frozenset(
-    {"why", "what we found", "note", "reason", "measured"}
+    {"why", "what we found", "note", "reason", "measured",
+     "what this check cannot establish"}
 )
 
 
@@ -280,15 +281,25 @@ def render(
     # -- model ----------------------------------------------------------
     models = [f for f in findings if f.asset_type == "model"]
     if models:
+        # PS 2.2.2 asks for the access assumptions, the confidence and the
+        # limitations of each model assessment — so all three are columns here,
+        # not a footnote.
         rows = [
             [
                 f.detector_id,
+                f"tier {f.access_tier}",
                 "could not run" if f.is_unavailable else f.disposition,
+                "—" if f.confidence is None else f"{100 * f.confidence:.0f}%",
                 f.reason,
+                " ".join(f.limitations) if f.limitations else "—",
             ]
             for f in models
         ]
-        body = _table(["check", "result", "what we found"], rows, pill_cols={1})
+        body = _table(
+            ["check", "access assumed", "result", "confidence", "what we found",
+             "what this check cannot establish"],
+            rows, pill_cols={2},
+        )
         caveats = [f.reason for f in models if f.is_unavailable]
         if caveats:
             body += (

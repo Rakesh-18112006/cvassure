@@ -48,9 +48,19 @@ class ContributorDetector(Detector):
     # ``ContributorDetector`` is different from the rest: it consumes the other
     # detectors' output rather than the images, so it has its own entry point.
     def aggregate(
-        self, ctx: AuditContext, sample_findings: Sequence[Finding]
+        self, ctx: AuditContext, sample_findings: Sequence[Finding], *,
+        dimension: str = "contributor_id", asset_type: str = "contributor",
+        noun: str = "Contributor",
     ) -> list[Finding]:
-        attributed = [s for s in ctx.samples if s.contributor_id]
+        """Roll sample-level evidence up to a source.
+
+        ``dimension`` selects which piece of source metadata to group by. PS
+        clause 2.2.1 asks for "contributor, batch or source metadata", and a
+        batch is a genuinely different question from a contributor: one honest
+        supplier can still send one bad consignment, and rolling that up per
+        contributor averages it away.
+        """
+        attributed = [s for s in ctx.samples if getattr(s, dimension, None)]
         if not attributed:
             return [
                 Finding.unavailable(
@@ -66,9 +76,9 @@ class ContributorDetector(Detector):
                     ),
                     unavailable_reason=NO_CONTRIBUTOR_METADATA,
                 )
-            ]
+            ] if dimension == "contributor_id" else []
 
-        contributor_of = {s.sample_id: s.contributor_id for s in attributed}
+        contributor_of = {s.sample_id: getattr(s, dimension) for s in attributed}
         totals: dict[str, int] = defaultdict(int)
         for cid in contributor_of.values():
             totals[cid] += 1
@@ -127,33 +137,33 @@ class ContributorDetector(Detector):
                 # exactly the kind of overstatement that costs trust.
                 if risk.rate >= others_max[cid]:
                     comparison = (
-                        f"Every other contributor is under "
+                        f"Every other source is under "
                         f"{100 * others_max[cid]:.0f}%. This is almost certainly "
                         f"deliberate, not bad luck."
                     )
                 else:
                     comparison = (
                         f"That is well above the {100 * others_median[cid]:.0f}% we see "
-                        f"across the other contributors, though it is not the worst here."
+                        f"across the other sources, though it is not the worst here."
                     )
                 reason = (
-                    f"Contributor {cid} sent {risk.n:,} images and {risk.n_flagged:,} of "
+                    f"{noun} {cid} sent {risk.n:,} images and {risk.n_flagged:,} of "
                     f"them look tampered with (about {100 * risk.rate:.0f}%). "
                     f"{comparison}{what} "
-                    f"Recommend: quarantine all of Contributor {cid}'s data."
+                    f"Recommend: quarantine all of {noun.lower()} {cid}'s data."
                 )
             elif disposition == "review":
                 reason = (
-                    f"Contributor {cid} sent {risk.n:,} images and {risk.n_flagged:,} of "
+                    f"{noun} {cid} sent {risk.n:,} images and {risk.n_flagged:,} of "
                     f"them look wrong (about {100 * risk.rate:.0f}%). That is higher than "
                     f"we would like, but with this many images we cannot yet rule out "
                     f"bad luck — the true rate could be anywhere between "
                     f"{100 * risk.lo:.0f}% and {100 * risk.hi:.0f}%.{what} "
-                    f"Recommend: have someone look at a sample of this contributor's work."
+                    f"Recommend: have someone look at a sample of this {noun.lower()}'s work."
                 )
             else:
                 reason = (
-                    f"Contributor {cid} sent {risk.n:,} images and only "
+                    f"{noun} {cid} sent {risk.n:,} images and only "
                     f"{risk.n_flagged:,} of them ({100 * risk.rate:.1f}%) look wrong, "
                     f"which is within what we would expect from an honest source. "
                     f"Recommend: accept."
@@ -161,8 +171,8 @@ class ContributorDetector(Detector):
 
             findings.append(
                 Finding(
-                    asset_ref=cid,
-                    asset_type="contributor",
+                    asset_ref=cid if dimension == "contributor_id" else f"batch:{cid}",
+                    asset_type=asset_type,
                     attack_class="systematic_mislabel",
                     detector_id=self.detector_id,
                     access_tier=ctx.access_tier,

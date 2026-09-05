@@ -118,6 +118,16 @@ class Finding:
     artefacts: list[str] = field(default_factory=list)
     unavailable_reason: str | None = None
     calibrated_score: float | None = None
+    #: How sure we are of *this* finding, 0..1 — distinct from ``raw_score``,
+    #: which is how suspicious the asset is. A hash comparison that does not
+    #: match is confidence 1.0 at any score; a statistical shape argument is
+    #: confidence 0.5 however alarming the number. PS clause 2.2.2 requires
+    #: model assessments to state this.
+    confidence: float | None = None
+    #: What this particular assessment could *not* establish. Also required by
+    #: PS 2.2.2, and printed beside the finding rather than buried in a
+    #: methodology section nobody reads.
+    limitations: list[str] = field(default_factory=list)
     finding_id: str = field(default_factory=lambda: uuid.uuid4().hex)
 
     def __post_init__(self) -> None:
@@ -136,6 +146,8 @@ class Finding:
             )
         if self.calibrated_score is not None and not 0.0 <= float(self.calibrated_score) <= 1.0:
             raise ValueError("calibrated_score must be in 0..1")
+        if self.confidence is not None and not 0.0 <= float(self.confidence) <= 1.0:
+            raise ValueError("confidence must be in 0..1")
         # An UNAVAILABLE finding is allowed to be numberless — it is a status
         # message, not a claim about the data.
         check_plain_english(self.reason, require_number=self.unavailable_reason is None)

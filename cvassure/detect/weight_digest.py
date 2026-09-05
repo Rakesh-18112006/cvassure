@@ -150,6 +150,12 @@ class WeightDigestDetector(Detector):
                     f"{detail} This is a hash comparison, not an estimate — the numbers "
                     f"either match or they do not."
                 ),
+                confidence=1.0,
+                limitations=[
+                    "This is a comparison against an enrolled record, so it "
+                    "detects change, not badness: a legitimate re-export of the "
+                    "same model also fails it.",
+                ],
                 evidence={
                     "enrolled_digest": enrolled,
                     "observed_digest": digest,

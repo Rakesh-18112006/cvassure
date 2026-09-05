@@ -615,3 +615,105 @@ def test_the_stylesheet_lets_tables_scroll_instead_of_crushing_columns():
     assert "td:first-child{overflow-wrap:anywhere}" in css, (
         "long filenames must break rather than widening the whole table"
     )
+
+
+# --------------------------------------------------------------------------
+# PS 2.2.2: access assumptions, confidence and limitations
+# --------------------------------------------------------------------------
+
+
+def test_a_finding_can_carry_confidence_and_limitations():
+    f = make_finding(confidence=0.45,
+                     limitations=["reports a shape, not proof"])
+    assert f.confidence == pytest.approx(0.45)
+    assert f.limitations == ["reports a shape, not proof"]
+    assert Finding.from_dict(f.to_dict()) == f
+
+
+def test_confidence_is_range_checked():
+    with pytest.raises(ValueError):
+        make_finding(confidence=1.5)
+
+
+def test_model_findings_state_confidence_and_limits(toy_models, synth_root, tmp_path):
+    """Every model check must say how sure it is and what it could not settle."""
+    from cvassure.detect import model as model_suite
+    from cvassure.detect.base import AuditContext
+    from cvassure.detect.embed import EmbeddingStore
+    from cvassure.ingest.dataset import load_dataset
+    from cvassure.ingest.models import load_model
+
+    original = load_model(toy_models["onnx"], access_tier=2)
+    enrolled = model_suite.enrol(original)
+    ctx = AuditContext(
+        samples=load_dataset(synth_root).samples,
+        access_tier=2,
+        model=load_model(toy_models["substitute_onnx"], access_tier=2),
+        embeddings=EmbeddingStore(cache_dir=None),
+        enrolled_fingerprint=enrolled,
+        out_dir=tmp_path,
+    )
+    findings, _ = model_suite.run_all(ctx)
+    live = [f for f in findings if not f.is_unavailable]
+    assert live, "no model check produced a live finding"
+    for f in live:
+        assert f.confidence is not None, f"{f.detector_id} states no confidence"
+        assert f.limitations, f"{f.detector_id} states no limitations"
+
+
+def test_the_report_shows_confidence_and_limitations(tmp_path):
+    f = make_finding(asset_ref="model", asset_type="model", detector_id="weight_stats",
+                     attack_class="model_backdoor", confidence=0.45,
+                     limitations=["A lopsided layer can come from class imbalance."],
+                     reason="Class 3 pulls 4.1 times harder than a typical class.")
+    path = report_html.write(
+        tmp_path / "r.html", findings=[f],
+        verdict=report_build.overall_verdict([f]),
+        coverage=report_build.build_coverage([f], access_tier=1), inputs={})
+    text = path.read_text()
+    assert "confidence" in text and "45%" in text
+    assert "what this check cannot establish" in text
+    assert "class imbalance" in text
+
+
+# --------------------------------------------------------------------------
+# PS 2.3: the assurance-report schema is a deliverable
+# --------------------------------------------------------------------------
+
+
+def test_schema_is_generated_and_matches_the_dataclass(tmp_path):
+    from cvassure.core.schema_export import finding_schema, write
+
+    paths = write(tmp_path)
+    assert all(p.exists() for p in paths.values())
+
+    schema = finding_schema()
+    documented = set(schema["properties"])
+    actual = set(Finding.__dataclass_fields__)
+    assert documented == actual, (
+        f"schema and dataclass disagree: only in schema {documented - actual}, "
+        f"only in code {actual - documented}"
+    )
+
+
+def test_every_real_finding_validates_against_the_published_schema(
+        synth_root, toy_models, tmp_path):
+    """A schema nothing validates against is decoration. Run a real audit and
+    check every finding it emits against the published contract."""
+    jsonschema = pytest.importorskip("jsonschema")
+    from cvassure.core.schema_export import finding_schema
+    from cvassure.pipeline import run_audit
+    from cvassure.score.evaluate import read_findings
+
+    out = tmp_path / "out"
+    run_audit(Namespace(
+        dataset=str(synth_root), model=str(toy_models["onnx"]), access_tier=2,
+        receipts=None, pubkey="keys/pub.pem", reference=None,
+        enrolled_fingerprint=None, format="auto", contributors=None,
+        contributor_from_path=None, out=str(out), seed=0, quiet=True))
+
+    schema = finding_schema()
+    findings = read_findings(out / "findings.jsonl")
+    assert findings
+    for f in findings:
+        jsonschema.validate(f.to_dict(), schema)

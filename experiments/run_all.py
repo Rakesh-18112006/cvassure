@@ -11,7 +11,17 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import time
+
+# Set before torch is imported. PyTorch's OpenMP pool occasionally aborts at
+# interpreter exit on macOS with "recursive_mutex lock failed" — after the run
+# has already finished and written its results. The sweep is long enough that
+# losing it to a teardown race at the very end is not acceptable, and the tests
+# pin threads for the same reason.
+os.environ.setdefault("OMP_NUM_THREADS", "1")
+os.environ.setdefault("MKL_NUM_THREADS", "1")
+os.environ.setdefault("KMP_DUPLICATE_LIB_OK", "TRUE")
 from pathlib import Path
 from typing import Any, Iterator
 
@@ -33,6 +43,12 @@ SWEEP_SPECS: dict[str, dict[str, Any]] = {
     },
     "07_ood_insertion.yaml": {
         "knob": ("ood_insertion", "count"), "attack": "ood_insertion", "scale": "count",
+    },
+    # PS 2.2.1 names systematic mislabelling as its own attack class, so it is
+    # swept as one rather than being left to fall out of the label-noise rows.
+    "05_systematic_mislabel.yaml": {
+        "knob": ("systematic_mislabel", "rate"), "attack": "systematic_mislabel",
+        "scale": "source",
     },
 }
 
@@ -64,11 +80,29 @@ def build_dataset(root: Path, name: str, seed: int = 0) -> Path:
 
 def _apply_rate(cfg: dict[str, Any], spec: dict[str, Any], rate: float,
                 n_samples: int) -> dict[str, Any]:
+    """Set the attack's knob so that ``rate`` means the same thing everywhere.
+
+    The sweep's x-axis is "share of the *dataset* that is poisoned". Most
+    attacks take exactly that. A contributor-scoped attack does not: its rate
+    is a share of one contributor's images, and that contributor holds only
+    1/k of the intake — so a requested 5% arrives as 1% and the row measures
+    almost nothing. Rates are converted rather than passed through.
+    """
     attack_type, knob = spec["knob"]
     out = json.loads(json.dumps(cfg))
+    n_contributors = int((out.get("contributors") or {}).get("n", 5))
     for entry in out.get("attacks", []):
         if entry.get("type") == attack_type:
-            if spec.get("scale") == "count":
+            if spec.get("scale") == "source":
+                # One contributor holds about 1/k of the data, so to poison
+                # `rate` of the dataset they must mislabel `rate * k` of theirs.
+                entry[knob] = float(min(1.0, rate * n_contributors))
+                # The shipped config restricts the attack to two class names so
+                # the demo is legible. Left in place it caps the reachable rate
+                # at whatever share those classes happen to be, which would make
+                # the high-rate cells unmeasurable.
+                entry.pop("mapping", None)
+            elif spec.get("scale") == "count":
                 if knob == "n_seeds":
                     copies = int(entry.get("n_copies", 8))
                     entry[knob] = max(1, int(round(rate * n_samples / copies)))

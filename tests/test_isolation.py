@@ -75,3 +75,52 @@ def test_the_report_never_reads_the_answer_key():
             if "ground_truth" in path.read_text(encoding="utf-8"):
                 readers.append(str(path.relative_to(PACKAGE.parent)))
     assert not readers, f"these must not read the answer key: {readers}"
+
+
+# --------------------------------------------------------------------------
+# PS 2.2.6: baseline assessment must not retrain the contributed model
+# --------------------------------------------------------------------------
+
+
+def test_no_detector_puts_model_weights_into_an_optimiser():
+    """`trigger_recon` runs gradient descent — but on a mask and a pattern, never
+    on the model. The distinction is the whole of clause 2.2.6, so it is read
+    out of the source rather than trusted."""
+    offenders = []
+    for path in _python_files(DETECT):
+        text = path.read_text(encoding="utf-8")
+        for lineno, line in enumerate(text.splitlines(), 1):
+            stripped = line.split("#", 1)[0]
+            if "optim." in stripped and "parameters()" in stripped:
+                offenders.append(f"{path.name}:{lineno}: {line.strip()}")
+            if ".train()" in stripped:
+                offenders.append(f"{path.name}:{lineno}: {line.strip()}")
+    assert not offenders, (
+        "a detector appears to train the model under audit:\n" + "\n".join(offenders)
+    )
+
+
+def test_the_audited_model_is_bit_identical_after_a_full_tier_2_audit(
+        toy_models, tmp_path):
+    """The strongest form of the claim: hash the model file before and after."""
+    from argparse import Namespace
+    import shutil
+
+    from cvassure.core.hashing import file_digest
+    from cvassure.datasets import synth
+    from cvassure.pipeline import run_audit
+
+    model = tmp_path / "vendor.pt"
+    shutil.copy2(toy_models["torchscript"], model)
+    before = file_digest(model)
+
+    data = tmp_path / "data"
+    synth.build(data, n_per_class=10, n_classes=4, n_contributors=2, seed=1)
+
+    run_audit(Namespace(
+        dataset=str(data), model=str(model), access_tier=2, receipts=None,
+        pubkey="keys/pub.pem", reference=None, enrolled_fingerprint=None,
+        format="auto", contributors=None, contributor_from_path=None,
+        out=str(tmp_path / "out"), seed=0, quiet=True))
+
+    assert file_digest(model) == before, "the audit modified the model it was auditing"

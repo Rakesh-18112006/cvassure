@@ -187,7 +187,7 @@ measured numbers — the coverage statement is derived from what actually ran
 and what it actually scored, never hand-written, so it cannot drift out of
 sync with reality.
 
-Measured over 225 cells (5 attacks × 5 poison rates × 3 access tiers × 3
+Measured over 270 cells (6 attacks × 5 poison rates × 3 access tiers × 3
 seeds) on SYNTH-10, plus 12 tampering attempts, graded on the **median** cell
 rather than the best one:
 
@@ -195,6 +195,7 @@ rather than the best one:
 | --- | --- | --- | --- | --- |
 | The same photograph submitted many times | 1.00 | 0.45 – 1.00 | 3.0% | strong |
 | Images from a completely different source | 1.00 | 0.73 – 1.00 | 1.3% | strong |
+| One contributor mislabels systematically | 1.00 | 0.01 – 1.00 | 1.0% | strong |
 | A marker pasted onto the image | 0.93 | 0.67 – 1.00 | 1.7% | strong |
 | The picture is fine, the label is wrong | 0.93 | 0.83 – 1.00 | 1.0% | strong |
 | **A faint pattern laid over the whole image** | **0.20** | 0.00 – 0.67 | 1.1% | **unsupported** |
@@ -230,6 +231,12 @@ scores and it must come out at 1.0. Both are tests.
 
 ---
 
+Every clause of the problem statement is mapped to the code that implements it
+and the test or measured number that shows it works, in
+[`docs/PS_COVERAGE.md`](docs/PS_COVERAGE.md). The report format itself is
+published as JSON Schema in [`docs/ASSURANCE_SCHEMA.md`](docs/ASSURANCE_SCHEMA.md)
+(regenerate with `cvassure schema`).
+
 ## Layout
 
 ```
@@ -247,7 +254,7 @@ cvassure/
   pipeline.py cli.py demo.py
 configs/attacks/   eleven ready-made attack configurations
 experiments/       run_all.py, aggregate.py
-tests/             273 tests
+tests/             301 tests
 ```
 
 ## Datasets

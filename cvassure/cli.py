@@ -100,6 +100,15 @@ def _cmd_audit_verify(args: argparse.Namespace) -> int:
     return 0 if result.ok else 1
 
 
+def _cmd_schema(args: argparse.Namespace) -> int:
+    from cvassure.core.schema_export import write
+
+    paths = write(args.out)
+    for name, path in paths.items():
+        print(f"  {name:<9} {path}")
+    return 0
+
+
 def _cmd_demo(args: argparse.Namespace) -> int:
     from cvassure.demo import run_demo
 
@@ -197,6 +206,12 @@ def build_parser() -> argparse.ArgumentParser:
     auv = sub.add_parser("audit-verify", help="recheck the audit log's own hash chain")
     auv.add_argument("--log", default="results/audit_log.jsonl")
     auv.set_defaults(func=_cmd_audit_verify)
+
+    # -- schema ----------------------------------------------------------
+    sc2 = sub.add_parser("schema", help="write the assurance-report schema "
+                                        "(JSON Schema + a readable description)")
+    sc2.add_argument("--out", default="docs")
+    sc2.set_defaults(func=_cmd_schema)
 
     # -- demo ------------------------------------------------------------
     dm = sub.add_parser("demo", help="run the four-minute judge sequence")

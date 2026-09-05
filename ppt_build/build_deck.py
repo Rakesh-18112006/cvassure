@@ -299,7 +299,7 @@ def slide2(slide):
         ("0.93", "pasted markers &\nlabel flips caught", GREEN),
         ("100%", "log tampering caught,\nright failure named", NAVY),
         ("0.20", "blended triggers — we\nreport this as a gap", RED),
-        ("273", "tests  ·  0 network calls\n225 measured cells", STEEL),
+        ("301", "tests  ·  0 network calls\n270 measured cells", STEEL),
     ]
     w, gap = 2.42, 0.19
     for i, (big, small, colour) in enumerate(kpis):
@@ -315,7 +315,7 @@ def slide2(slide):
                  space_after=0)
 
     tb, tf = textbox(slide, LEFT, 6.40, 12.6, 0.30)
-    para(tf, "Measured over 225 swept cells (5 attacks × 5 poison rates × 3 access "
+    para(tf, "Measured over 270 swept cells (6 attacks × 5 poison rates × 3 access "
              "tiers × 3 seeds) plus 12 tampering attempts — graded on the median "
              "cell, never the best.", 10.3, color=MUTE, italic=True, first=True,
          align=PP_ALIGN.CENTER, space_after=0)
@@ -440,7 +440,7 @@ def slide4(slide):
 
     # ---- left: the chart -------------------------------------------------
     section_head(slide, LEFT, 1.18, 6.6,
-                 "Measured, not asserted — 225 cells, 3 seeds each", color=NAVY)
+                 "Measured, not asserted — 270 cells, 3 seeds each", color=NAVY)
     card(slide, LEFT, 1.50, 6.42, 3.68, fill=WHITE)
     picture(slide, A / "chart_sweep.png", 0.87, 1.60, h=3.02)
     tb, tf = textbox(slide, LEFT + 0.16, 4.76, 6.12, 0.26)
@@ -454,7 +454,7 @@ def slide4(slide):
     tb, tf = textbox(slide, 7.32, 1.61, 5.50, 1.20)
     for i, (lead, rest) in enumerate([
         ("Already built and measured.",
-         " Not a concept — 273 tests, 225 swept cells, four results tables."),
+         " Not a concept — 301 tests, 270 swept cells, four results tables."),
         ("Commodity hardware.",
          " 347 images audited in 13 s on a laptop CPU. No GPU, no cluster, no cloud."),
         ("Deploys into an air-gap.",
@@ -496,6 +496,7 @@ def coverage_table(slide, x, y):
         ("What an attacker did", "Typical TPR@1%FPR", "Range", "False alarms", "Status"),
         ("The same photograph submitted many times", "1.00", "0.45 – 1.00", "3.0%", "strong"),
         ("Images from a completely different source", "1.00", "0.73 – 1.00", "1.3%", "strong"),
+        ("One contributor mislabels systematically", "1.00", "0.01 – 1.00", "1.0%", "strong"),
         ("A marker pasted onto the image", "0.93", "0.67 – 1.00", "1.7%", "strong"),
         ("The picture is fine, the label is wrong", "0.93", "0.83 – 1.00", "1.0%", "strong"),
         ("A faint pattern over the whole image", "0.20", "0.00 – 0.67", "1.1%", "UNSUPPORTED"),
@@ -504,14 +505,14 @@ def coverage_table(slide, x, y):
     widths = [4.55, 1.95, 2.20, 1.65, 2.26]
     rows, cols = len(data), len(data[0])
     tbl_shape = slide.shapes.add_table(rows, cols, Inches(x), Inches(y),
-                                       Inches(sum(widths)), Inches(0.165 * rows))
+                                       Inches(sum(widths)), Inches(0.152 * rows))
     table = tbl_shape.table
     table.first_row = False
     table.horz_banding = False
     for i, w in enumerate(widths):
         table.columns[i].width = Inches(w)
     for r, row in enumerate(data):
-        table.rows[r].height = Inches(0.165)
+        table.rows[r].height = Inches(0.152)
         for c, value in enumerate(row):
             cell = table.cell(r, c)
             cell.margin_left = Inches(0.06); cell.margin_right = Inches(0.04)
@@ -681,7 +682,7 @@ def slide6(slide):
     tb, tf = textbox(slide, 7.22, 4.77, 5.58, 1.44)
     for i, (cmd, rest) in enumerate([
         ("make reproduce", "  regenerates every number and figure from scratch, offline."),
-        ("make verify", "  runs 273 tests plus the assertion that nothing touched the "
+        ("make verify", "  runs 301 tests plus the assertion that nothing touched the "
                         "network."),
         ("make demo", "  the four-minute judge sequence, laptop in airplane mode."),
     ]):

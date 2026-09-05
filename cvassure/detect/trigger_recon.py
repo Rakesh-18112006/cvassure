@@ -153,6 +153,19 @@ class TriggerReconDetector(Detector):
                 severity=severity,
                 disposition=disposition,
                 reason=reason,
+                confidence=float(np.clip(top_index / (2 * ANOMALY_THRESHOLD), 0.2, 0.95)),
+                limitations=(
+                    ["Only the first %d of %d classes were searched within the "
+                     "time budget, so a backdoor in an unchecked class would have "
+                     "been missed." % (len(classes), n_classes)] if partial else []
+                ) + (
+                    ["The search hit its step limit for %d class(es); those "
+                     "results are a lower bound." % len(capped)] if capped else []
+                ) + [
+                    "Reconstruction finds triggers that work by pasting a patch. "
+                    "A trigger blended across the whole image would not be found "
+                    "this way.",
+                ],
                 evidence={
                     "anomaly_index": round(top_index, 3),
                     "threshold": ANOMALY_THRESHOLD,

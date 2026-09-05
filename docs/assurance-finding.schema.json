@@ -1,0 +1,148 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://sih26228.local/cvassure/assurance-report.schema.json",
+  "title": "cvassure assurance finding",
+  "description": "One statement about one asset, from one check, at one access tier. Every detector in cvassure returns a list of these and nothing else; the report, the scoring harness and the audit log all consume this one shape.",
+  "version": "1.0.0",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "finding_id",
+    "asset_ref",
+    "asset_type",
+    "attack_class",
+    "detector_id",
+    "access_tier",
+    "raw_score",
+    "severity",
+    "disposition",
+    "reason"
+  ],
+  "properties": {
+    "finding_id": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Unique id for this finding. Stable across a run, not across runs."
+    },
+    "asset_ref": {
+      "type": "string",
+      "minLength": 1,
+      "description": "What this finding is about: an image path, a contributor id, 'model', or a receipt reference."
+    },
+    "asset_type": {
+      "enum": [
+        "sample",
+        "contributor",
+        "model",
+        "receipt",
+        "dataset"
+      ],
+      "description": "Which kind of thing asset_ref names."
+    },
+    "attack_class": {
+      "enum": [
+        "clean",
+        "badnets_patch",
+        "blended_trigger",
+        "label_flip",
+        "systematic_mislabel",
+        "near_duplicate_flood",
+        "ood_insertion",
+        "model_substitute",
+        "model_perturb",
+        "model_backdoor",
+        "receipt_alter",
+        "receipt_replay",
+        "receipt_delete",
+        "receipt_reorder",
+        "distribution_shift"
+      ],
+      "description": "The attack this finding would be evidence of, if true."
+    },
+    "detector_id": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Which check produced it."
+    },
+    "access_tier": {
+      "enum": [
+        0,
+        1,
+        2
+      ],
+      "description": "The access level the audit was granted: 0 answers only, 1 plus weights, 2 plus internals."
+    },
+    "raw_score": {
+      "type": "number",
+      "minimum": 0.0,
+      "maximum": 1.0,
+      "description": "How suspicious the asset is, 0..1, higher is worse. A ranking, not a probability."
+    },
+    "calibrated_score": {
+      "type": [
+        "number",
+        "null"
+      ],
+      "minimum": 0.0,
+      "maximum": 1.0,
+      "description": "raw_score mapped to an actual probability of being poisoned, when a calibration split was available. Null during a live audit, where there is no ground truth."
+    },
+    "confidence": {
+      "type": [
+        "number",
+        "null"
+      ],
+      "minimum": 0.0,
+      "maximum": 1.0,
+      "description": "How sure we are of this finding, 0..1 \u2014 a different question from raw_score. A hash mismatch is confidence 1.0; a statistical shape argument is around 0.45 however alarming the score."
+    },
+    "severity": {
+      "enum": [
+        "low",
+        "medium",
+        "high",
+        "critical"
+      ],
+      "description": "Graded from the score, for triage."
+    },
+    "disposition": {
+      "enum": [
+        "accept",
+        "review",
+        "quarantine"
+      ],
+      "description": "The recommended action."
+    },
+    "reason": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 400,
+      "description": "One human-readable sentence containing real numbers. Enforced: a finding whose reason contains jargon or no number is rejected at construction."
+    },
+    "evidence": {
+      "type": "object",
+      "description": "Detector-specific supporting values behind the reason."
+    },
+    "artefacts": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "Paths to images produced as evidence, such as a saliency heatmap or a reconstructed trigger."
+    },
+    "limitations": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "What this particular assessment could not establish."
+    },
+    "unavailable_reason": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "Set when the check could not run at all. Such a finding is a status message, not a claim: its raw_score is always 0 and must not be scored."
+    }
+  }
+}

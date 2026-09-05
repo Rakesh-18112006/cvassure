@@ -85,6 +85,11 @@ class SpectralSignatureDetector(Detector):
                                 f"typical spread, which is unremarkable."
                             )
                         ),
+                        confidence=0.6,
+                        limitations=[
+                            "Separates a group that moves together; it cannot say "
+                            "whether that group is poisoned or merely unusual.",
+                        ],
                         evidence={
                             "class": label,
                             "class_size": len(members),

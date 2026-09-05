@@ -110,6 +110,14 @@ class WeightStatsDetector(Detector):
                 severity="high" if score >= 0.7 else ("medium" if score >= 0.45 else "low"),
                 disposition="review" if score >= 0.5 else "accept",
                 reason=reason,
+                confidence=0.45,
+                limitations=[
+                    "This reports a shape, not proof. A lopsided final layer can "
+                    "come from honest class imbalance as easily as from a backdoor.",
+                    "It runs without any enrolled reference, so it cannot tell a "
+                    "suspicious model from one that was always like this.",
+                    "A tier-2 audit can reconstruct the trigger and settle it.",
+                ],
                 evidence={
                     "layer": name,
                     "n_classes": int(head.shape[0]),

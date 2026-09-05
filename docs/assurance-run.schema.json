@@ -1,0 +1,175 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://sih26228.local/cvassure/assurance-run.schema.json",
+  "title": "cvassure assurance run",
+  "version": "1.0.0",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "generated_utc",
+    "access_tier",
+    "inputs",
+    "findings",
+    "coverage"
+  ],
+  "properties": {
+    "generated_utc": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "access_tier": {
+      "enum": [
+        0,
+        1,
+        2
+      ]
+    },
+    "offline": {
+      "type": "boolean",
+      "description": "True when the run asserted no network access."
+    },
+    "inputs": {
+      "type": "object",
+      "description": "Digests of everything the verdict was derived from.",
+      "properties": {
+        "dataset_root": {
+          "type": "string"
+        },
+        "dataset_digest": {
+          "type": "string"
+        },
+        "n_samples": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "model_path": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "model_file_digest": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "receipts_path": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      }
+    },
+    "verdict": {
+      "type": "object",
+      "required": [
+        "headline",
+        "colour"
+      ],
+      "properties": {
+        "headline": {
+          "type": "string"
+        },
+        "colour": {
+          "enum": [
+            "green",
+            "amber",
+            "red"
+          ]
+        },
+        "lines": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "findings": {
+      "type": "array",
+      "items": {
+        "$ref": "https://sih26228.local/cvassure/assurance-report.schema.json"
+      }
+    },
+    "coverage": {
+      "type": "array",
+      "description": "Generated from what actually ran and what it measured \u2014 never hand-written.",
+      "items": {
+        "type": "object",
+        "required": [
+          "attack_class",
+          "access_tier",
+          "status"
+        ],
+        "properties": {
+          "attack_class": {
+            "enum": [
+              "clean",
+              "badnets_patch",
+              "blended_trigger",
+              "label_flip",
+              "systematic_mislabel",
+              "near_duplicate_flood",
+              "ood_insertion",
+              "model_substitute",
+              "model_perturb",
+              "model_backdoor",
+              "receipt_alter",
+              "receipt_replay",
+              "receipt_delete",
+              "receipt_reorder",
+              "distribution_shift"
+            ]
+          },
+          "access_tier": {
+            "enum": [
+              0,
+              1,
+              2
+            ]
+          },
+          "status": {
+            "enum": [
+              "supported",
+              "partial",
+              "unsupported",
+              "not measured"
+            ]
+          },
+          "detector": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "measured": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "note": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "audit_log": {
+      "type": "object",
+      "description": "The audit's own tamper-evident record.",
+      "properties": {
+        "path": {
+          "type": "string"
+        },
+        "n_records": {
+          "type": "integer"
+        },
+        "verified": {
+          "type": "boolean"
+        }
+      }
+    }
+  }
+}

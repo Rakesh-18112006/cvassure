@@ -226,6 +226,13 @@ class FingerprintDetector(Detector):
                 severity=severity,
                 disposition=disposition,
                 reason=reason,
+                confidence=(1.0 if cmp.get("identical") or score >= 0.8 else 0.75),
+                limitations=[
+                    "Proves the model changed, not what changed: at this access "
+                    "level we cannot say which layers were edited.",
+                    "A model retrained to give identical answers on these 200 "
+                    "probes would pass — the probe set is fixed and seeded.",
+                ],
                 evidence={
                     "n_probes": self.n_probes,
                     "probe_seed": self.seed,

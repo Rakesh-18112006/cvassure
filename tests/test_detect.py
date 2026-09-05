@@ -696,3 +696,76 @@ def test_every_reason_would_pass_a_judge(synth_root, toy_models, store, tmp_path
     for f in findings + model_findings:
         check_plain_english(f.reason, require_number=not f.is_unavailable)
         assert not f.reason.startswith("Anomalous")
+
+
+# --------------------------------------------------------------------------
+# PS 2.2.1: "contributor, batch or source metadata"
+# --------------------------------------------------------------------------
+
+
+def test_risk_can_be_aggregated_by_batch_as_well_as_contributor(synth_root, store,
+                                                                tmp_path):
+    """An honest contributor can still send one bad consignment. Rolling that
+    up per contributor averages it away, so batches get their own verdict."""
+    from cvassure.core.schemas import Sample
+    from cvassure.detect.contributor import ContributorDetector
+
+    ctx = make_ctx(synth_root, store, tmp_path)
+    # every image from one contributor, split across two batches
+    ctx.samples = [
+        Sample(s.sample_id, s.image_path, s.label, "C0",
+               "B_bad" if i % 4 == 0 else "B_good")
+        for i, s in enumerate(ctx.samples)
+    ]
+    bad_batch = {s.sample_id for s in ctx.samples if s.batch_id == "B_bad"}
+
+    flagged = [
+        Finding(
+            asset_ref=sid, asset_type="sample", attack_class="badnets_patch",
+            detector_id="trigger_freq", access_tier=0, raw_score=0.9,
+            severity="high", disposition="quarantine",
+            reason="The bottom-right of this image is 9.0 times sharper than the rest.",
+        )
+        for sid in sorted(bad_batch)
+    ]
+
+    agg = ContributorDetector()
+    by_contributor = agg.aggregate(ctx, flagged)
+    by_batch = agg.aggregate(ctx, flagged, dimension="batch_id", noun="Batch")
+
+    # the contributor looks moderately bad; the batch is unambiguous
+    c0 = [f for f in by_contributor if f.asset_ref == "C0"][0]
+    batches = {f.asset_ref: f for f in by_batch}
+    assert set(batches) == {"batch:B_bad", "batch:B_good"}
+    assert batches["batch:B_bad"].raw_score > c0.raw_score
+    assert batches["batch:B_bad"].disposition == "quarantine"
+    assert batches["batch:B_good"].disposition == "accept"
+    assert "Batch" in batches["batch:B_bad"].reason
+
+
+def test_batch_aggregation_is_silent_when_there_are_no_batches(synth_root, store,
+                                                               tmp_path):
+    """No batch metadata is not an error, and must not produce a spurious
+    'unavailable' finding on top of the contributor one."""
+    from cvassure.detect.contributor import ContributorDetector
+
+    ctx = make_ctx(synth_root, store, tmp_path)
+    assert ContributorDetector().aggregate(ctx, [], dimension="batch_id") == []
+
+
+def test_the_audit_reports_batches_when_the_dataset_has_them(yolo_root, tmp_path):
+    """YOLO's train/val split is a natural batch id, and the loader already
+    reads it — the audit should use it."""
+    from argparse import Namespace
+
+    from cvassure.pipeline import run_audit
+    from cvassure.score.evaluate import read_findings
+
+    out = tmp_path / "out"
+    run_audit(Namespace(
+        dataset=str(yolo_root), model=None, access_tier=0, receipts=None,
+        pubkey="keys/pub.pem", reference=None, enrolled_fingerprint=None,
+        format="auto", contributors=None, contributor_from_path=None,
+        out=str(out), seed=0, quiet=True))
+    refs = {f.asset_ref for f in read_findings(out / "findings.jsonl")}
+    assert any(r.startswith("batch:") for r in refs), refs

@@ -77,7 +77,10 @@ def run_audit(args) -> int:
             model = load_model(args.model, args.access_tier)
             print(f"  model: {model.kind}, access tier {args.access_tier}")
         except Exception as exc:
-            print(f"  model could not be loaded ({exc}); continuing with the data checks")
+            why = getattr(exc, "plain_english", str(exc))
+            print(f"  model could not be loaded: {why}")
+            print("  continuing with the data checks; the report will say "
+                  "the model was not assessed")
 
     enrolled = None
     if getattr(args, "enrolled_fingerprint", None):
@@ -160,7 +163,15 @@ def run_audit(args) -> int:
 
     started = _dt.datetime.now(_dt.timezone.utc).isoformat()
     t0 = time.perf_counter()
-    contributor_findings = ContributorDetector().aggregate(ctx, findings)
+    aggregator = ContributorDetector()
+    contributor_findings = aggregator.aggregate(ctx, findings)
+    # PS 2.2.1 asks for contributor *or batch* level assessment. A batch is a
+    # different question: an honest supplier can still send one bad
+    # consignment, and a per-contributor average hides exactly that.
+    contributor_findings += aggregator.aggregate(
+        ctx, findings, dimension="batch_id", asset_type="contributor",
+        noun="Batch",
+    )
     contributor_result = DetectorResult(
         "contributor", contributor_findings, time.perf_counter() - t0, 0.0
     )
