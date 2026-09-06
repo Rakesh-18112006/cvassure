@@ -571,6 +571,28 @@ def test_the_sweep_figure_is_not_overwritten_by_the_representative_cell(tmp_path
     assert "joined_figures" in source
 
 
+def test_every_numbered_table_reaches_the_results_directory():
+    """Table 2 is built from the representative cell rather than the sweep, and
+    for one run of this project it landed only under `representative/` — so
+    `results/tables/` held tables 1, 3 and 4 and looked like a table was
+    missing. The promotion step is what stops that, so it is pinned here."""
+    import sys
+
+    sys.path.insert(0, str(__import__("pathlib").Path(__file__).resolve().parents[1]
+                          / "experiments"))
+    import aggregate
+    import inspect as _inspect
+
+    source = _inspect.getsource(aggregate._render_remaining_figures)
+    assert "table2_contributors" in source, (
+        "the contributor table must be promoted into results/tables/, not left "
+        "behind in results/representative/"
+    )
+
+    main_source = _inspect.getsource(aggregate.main)
+    assert "t2_md" in main_source, "Table 2 must appear in RESULTS.md as well"
+
+
 # --------------------------------------------------------------------------
 # table layout — the explanation column must not be crushed
 # --------------------------------------------------------------------------

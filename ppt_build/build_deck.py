@@ -299,7 +299,7 @@ def slide2(slide):
         ("0.93", "pasted markers &\nlabel flips caught", GREEN),
         ("100%", "log tampering caught,\nright failure named", NAVY),
         ("0.20", "blended triggers — we\nreport this as a gap", RED),
-        ("301", "tests  ·  0 network calls\n270 measured cells", STEEL),
+        ("302", "tests  ·  0 network calls\n270 measured cells", STEEL),
     ]
     w, gap = 2.42, 0.19
     for i, (big, small, colour) in enumerate(kpis):
@@ -454,7 +454,7 @@ def slide4(slide):
     tb, tf = textbox(slide, 7.32, 1.61, 5.50, 1.20)
     for i, (lead, rest) in enumerate([
         ("Already built and measured.",
-         " Not a concept — 301 tests, 270 swept cells, four results tables."),
+         " Not a concept — 302 tests, 270 swept cells, four results tables."),
         ("Commodity hardware.",
          " 347 images audited in 13 s on a laptop CPU. No GPU, no cluster, no cloud."),
         ("Deploys into an air-gap.",
@@ -682,7 +682,7 @@ def slide6(slide):
     tb, tf = textbox(slide, 7.22, 4.77, 5.58, 1.44)
     for i, (cmd, rest) in enumerate([
         ("make reproduce", "  regenerates every number and figure from scratch, offline."),
-        ("make verify", "  runs 301 tests plus the assertion that nothing touched the "
+        ("make verify", "  runs 302 tests plus the assertion that nothing touched the "
                         "network."),
         ("make demo", "  the four-minute judge sequence, laptop in airplane mode."),
     ]):

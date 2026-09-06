@@ -244,13 +244,19 @@ def coverage_md(rows: list[dict[str, Any]],
     return "\n".join(lines) + "\n"
 
 
-def _render_remaining_figures(rows: list[dict[str, Any]], out_dir: Path) -> None:
-    """Produce the five figures that need findings joined to their answer key.
+def _render_remaining_figures(rows: list[dict[str, Any]], out_dir: Path) -> str | None:
+    """Produce the five figures, and the one table, that need findings joined
+    to their answer key.
 
     Uses one representative cell — the mixed attack at a middling poison rate,
     which is what a contaminated intake actually looks like — rather than
     averaging incomparable runs together. Silently skipped if the sweep was run
     by an older version that did not keep its findings.
+
+    Returns Table 2 as Markdown so the caller can place it in RESULTS.md in
+    numerical order. Contributor risk cannot be averaged across the sweep the
+    way tables 1 and 4 can — contributor C2 in one cell is not the same actor as
+    C2 in the next — so it is reported from this one cell and says so.
     """
     candidates = [
         r for r in rows
@@ -261,7 +267,7 @@ def _render_remaining_figures(rows: list[dict[str, Any]], out_dir: Path) -> None
     if not candidates:
         print("  (no per-cell findings on disk — skipping the joined figures; "
               "re-run experiments/run_all.py to produce them)")
-        return
+        return None
 
     def rank(r):
         return (abs(r["poison_rate"] - 0.05), r["attack"] != "ood_insertion", r["seed"])
@@ -296,8 +302,28 @@ def _render_remaining_figures(rows: list[dict[str, Any]], out_dir: Path) -> None
     for src in sorted((out_dir / "representative" / "plots").glob("*")):
         if src.stem in joined_figures:
             shutil.copy2(src, out_dir / "plots" / src.name)
+
+    # Table 2 needs the same join, so it is produced here and promoted next to
+    # the sweep-wide tables. Without this it lands only under representative/
+    # and a reader looking for it in results/tables/ concludes it is missing.
+    table2 = next((t for t in result.tables if t.name == "table2_contributors"), None)
+    if table2 is not None:
+        for suffix in (".md", ".csv"):
+            src = out_dir / "representative" / "tables" / f"table2_contributors{suffix}"
+            if src.exists():
+                shutil.copy2(src, out_dir / "tables" / src.name)
+
     print(f"  calibration error {result.ece_before:.3f} before, "
           f"{result.ece_after:.3f} after")
+    if table2 is None:
+        return None
+    return (
+        table2.to_markdown()
+        + f"\n\nMeasured on one cell — {pick['attack']} at "
+        f"{100 * pick['poison_rate']:.0f}% poison, seed {pick['seed']} — because "
+        "contributor identities are generated per cell and averaging them across "
+        "the sweep would combine different actors under the same name.\n"
+    )
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -339,7 +365,7 @@ def main(argv: list[str] | None = None) -> int:
     from cvassure.score import plots
 
     plots.sweep(sweep, out_dir / "plots")
-    _render_remaining_figures(rows, out_dir)
+    t2_md = _render_remaining_figures(rows, out_dir)
     plots.runtime_scaling(
         [{"module": m, "n_samples": r["n"], "seconds": s}
          for r in rows for m, s in (r.get("per_detector_seconds") or {}).items()],
@@ -361,6 +387,7 @@ def main(argv: list[str] | None = None) -> int:
         "",
         t1.to_markdown(),
         "",
+        *([t2_md, ""] if t2_md else []),
         *([t3.to_markdown(), ""] if t3 is not None else []),
         t4.to_markdown(),
         "",
