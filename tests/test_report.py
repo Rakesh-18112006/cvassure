@@ -197,7 +197,9 @@ def test_verdict_counts_tampered_receipts():
     assert "1 record tampered" in report_build.overall_verdict(findings).render()
 
 
-def test_unavailable_findings_do_not_drive_the_verdict():
+def test_a_blocked_check_is_never_counted_as_a_problem():
+    """An unavailable finding must not turn the light red — it is a status
+    message, not a claim that something is wrong."""
     findings = [
         Finding.unavailable(
             asset_ref="model", asset_type="model", attack_class="model_backdoor",
@@ -206,7 +208,52 @@ def test_unavailable_findings_do_not_drive_the_verdict():
             unavailable_reason="requires tier 2",
         )
     ]
-    assert report_build.overall_verdict(findings).colour == "green"
+    assert report_build.overall_verdict(findings).colour != "red"
+
+
+def test_a_model_we_could_not_identify_is_never_called_verified_unchanged():
+    """The bug this pins: with no enrolment record, fingerprint and
+    weight_digest both go unavailable, and the headline used to fall through to
+    'Model: verified unchanged.' — on a model that had in fact been swapped.
+    A tool whose whole claim is honesty must not assert what it did not check."""
+    findings = [
+        Finding.unavailable(
+            asset_ref="model", asset_type="model", attack_class="model_substitute",
+            detector_id="fingerprint", access_tier=1,
+            reason="We had nothing to compare this model's answers against.",
+            unavailable_reason="no enrolled fingerprint supplied",
+        ),
+        Finding.unavailable(
+            asset_ref="model", asset_type="model", attack_class="model_tamper",
+            detector_id="weight_digest", access_tier=1,
+            reason="We had no recorded weights to compare against.",
+            unavailable_reason="no enrolled weight digest supplied",
+        ),
+        # This one ran and found nothing — but it cannot establish identity.
+        make_finding(asset_ref="model", asset_type="model",
+                     attack_class="model_tamper", detector_id="weight_stats",
+                     raw_score=0.1, severity="low", disposition="accept",
+                     reason="The last layer looks ordinary; no class dominates "
+                            "more than 1.4 times the average."),
+    ]
+    v = report_build.overall_verdict(findings)
+    rendered = v.render()
+    assert "verified unchanged" not in rendered
+    assert "NOT VERIFIED" in rendered
+    assert "no enrolled fingerprint supplied" in rendered
+    assert v.colour == "amber", "green would read as 'the model is fine'"
+
+
+def test_a_model_that_was_actually_checked_is_still_called_verified():
+    findings = [
+        make_finding(asset_ref="model", asset_type="model",
+                     attack_class="model_substitute", detector_id="fingerprint",
+                     raw_score=0.0, severity="low", disposition="accept",
+                     reason="All 200 recorded answers match to 15 decimal places."),
+    ]
+    v = report_build.overall_verdict(findings)
+    assert "verified unchanged" in v.render()
+    assert v.colour == "green"
 
 
 # --------------------------------------------------------------------------

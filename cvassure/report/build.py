@@ -270,11 +270,24 @@ class Verdict:
         return "\n".join([f"VERDICT: {self.headline}", *self.lines])
 
 
+#: The two checks that can actually establish "this is the model we were given".
+#: `weight_stats` looks for a lopsided layer and `spectral_signature` looks at
+#: activations — both are worth running, but neither can tell you the file is
+#: the same one, so neither may be used to justify the words "verified
+#: unchanged".
+IDENTITY_CHECKS = ("fingerprint", "weight_digest")
+
+
 def overall_verdict(findings: Sequence[Finding], *, n_samples: int = 0) -> Verdict:
     """The traffic light at the top of the report."""
     contributors = [f for f in findings if f.asset_type == "contributor" and not f.is_unavailable]
     models = [f for f in findings if f.asset_type == "model" and not f.is_unavailable]
     receipts = [f for f in findings if f.asset_type == "receipt" and not f.is_unavailable]
+
+    # A check that could not run is not a check that passed. Keeping the blocked
+    # model findings lets the headline say "we did not look" instead of
+    # "we looked and it was fine".
+    models_blocked = [f for f in findings if f.asset_type == "model" and f.is_unavailable]
 
     quarantined = [f for f in contributors if f.disposition == "quarantine"]
     review = [f for f in contributors if f.disposition == "review"]
@@ -295,13 +308,29 @@ def overall_verdict(findings: Sequence[Finding], *, n_samples: int = 0) -> Verdi
             parts.append(f"{len(review)} to review")
         lines.append(".  ".join(parts) + ".")
 
-    if models:
+    model_unverified = False
+    if models or models_blocked:
+        identity_ran = [f for f in models if f.detector_id in IDENTITY_CHECKS]
         if model_bad:
             lines.append("Model: SUBSTITUTED OR EDITED.")
         elif model_review:
             lines.append("Model: NEEDS REVIEW.")
-        else:
+        elif identity_ran:
             lines.append("Model: verified unchanged.")
+        else:
+            # Nothing that could establish identity was able to run. Saying
+            # "verified unchanged" here would be a false assurance — exactly the
+            # claim this system exists to avoid making.
+            model_unverified = True
+            why = next(
+                (f.unavailable_reason for f in models_blocked
+                 if f.detector_id in IDENTITY_CHECKS and f.unavailable_reason),
+                "the checks that establish model identity could not run",
+            )
+            lines.append(
+                f"Model: NOT VERIFIED — {why}. A swapped or edited model would "
+                "not have been caught."
+            )
 
     if receipts:
         n_bad = len(receipt_bad)
@@ -324,4 +353,8 @@ def overall_verdict(findings: Sequence[Finding], *, n_samples: int = 0) -> Verdi
         return Verdict("QUARANTINE RECOMMENDED", "red", lines)
     if review or model_review:
         return Verdict("REVIEW BEFORE USE", "amber", lines)
+    if model_unverified:
+        # Green would read as "the model is fine". It is not that; it is
+        # "we were not given what we needed to say".
+        return Verdict("NO PROBLEMS FOUND IN WHAT WE COULD CHECK", "amber", lines)
     return Verdict("NO PROBLEMS FOUND", "green", lines)

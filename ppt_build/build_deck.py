@@ -546,10 +546,12 @@ def slide5(slide):
     # ---- the verdict screenshot -----------------------------------------
     section_head(slide, LEFT, 1.18, 8.0, "What an analyst actually receives",
                  color=NAVY)
-    picture(slide, A / "shot_verdict.png", LEFT, 1.50, w=6.45)
-    tb, tf = textbox(slide, LEFT, 2.52, 6.45, 0.28)
-    para(tf, "Real output. One offline HTML file — no dashboard to host, nothing to "
-             "install on the analyst's machine.", 10.0, color=MUTE, italic=True,
+    # 6.15:1 after cropping the real banner out of the report — the width is
+    # chosen so the caption below it clears the chart cards at y=2.86.
+    picture(slide, A / "shot_verdict.png", LEFT, 1.50, w=6.10)
+    tb, tf = textbox(slide, LEFT, 2.53, 6.45, 0.28)
+    para(tf, "Real output from one command on one contaminated intake. Every figure "
+             "on this slide is that same run.", 10.0, color=MUTE, italic=True,
          first=True, space_after=0)
 
     # ---- charts ----------------------------------------------------------
@@ -562,7 +564,7 @@ def slide5(slide):
     card(slide, 3.72, 2.86, 3.43, 2.78, fill=WHITE)
     picture(slide, A / "chart_heatmap.png", 3.85, 2.96, h=2.15)
     tb, tf = textbox(slide, 3.80, 5.20, 3.27, 0.26)
-    para(tf, "What we did, against what was true.", 9.2, color=MUTE,
+    para(tf, "21 poisoned images: 18 caught, 3 missed.", 9.2, color=MUTE,
          align=PP_ALIGN.CENTER, first=True, space_after=0)
 
     # ---- bottom: before / after -----------------------------------------
@@ -573,7 +575,9 @@ def slide5(slide):
                False, INK)], 10.6, first=True, space_after=3)
     rich(tf, [("After:  ", True, GREEN),
               ("one line — quarantine Contributor C3, whose true poison rate was 51% "
-               "and whom we scored 45% with a 36–54% interval.", False, INK)],
+               "and whom we scored 45% with a 36–54% interval. All 3 bad actors "
+               "caught; 1 clean source over-flagged for review, never quarantined.",
+               False, INK)],
          10.6, space_after=0)
 
     # ---- right: impact ---------------------------------------------------

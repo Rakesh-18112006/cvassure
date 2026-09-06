@@ -46,11 +46,15 @@ make bootstrap
 make verify
 ```
 
-Then the single command shown to an evaluator:
+Then the single command shown to an evaluator. After `make demo` has laid down
+the scenario, this exact line reproduces the output below it — a pipeline
+compromised in all three places at once:
 
 ```bash
-.venv/bin/cvassure audit --dataset data/contributed --model models/vendor.onnx \
-  --access-tier 1 --receipts logs/inference.jsonl --out results/
+.venv/bin/cvassure audit --dataset results/demo/poisoned \
+  --model results/demo/swapped/vendor.onnx --access-tier 1 \
+  --receipts results/demo/tampered.jsonl --pubkey results/demo/keys/pub.pem \
+  --enrolled-fingerprint results/demo/enrolled.json --out results/compromised
 ```
 
 which prints, in large plain text:
@@ -61,6 +65,10 @@ VERDICT: QUARANTINE RECOMMENDED
 Model: SUBSTITUTED OR EDITED.
 Inference log: 2 records tampered (#347, #348).
 ```
+
+Drop `--enrolled-fingerprint` and the model line changes to **`NOT VERIFIED — no
+enrolled fingerprint supplied`**, and the headline stops being green. A check
+that could not run is never reported as a check that passed.
 
 and writes `results/report.html` — one self-contained file, all CSS inline,
 all images base64-embedded, no web fonts, no scripts from anywhere. It opens
