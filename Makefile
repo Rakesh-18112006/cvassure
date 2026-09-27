@@ -2,14 +2,18 @@
 PY := .venv/bin/python
 CV := .venv/bin/cvassure
 
-.PHONY: help bootstrap verify demo reproduce results clean test lint
+.PHONY: help bootstrap verify demo reproduce results clean test lint web
 
 help:
 	@echo "make bootstrap  build the local dataset, models and keys (once)"
 	@echo "make verify     run every test plus the offline assertion"
 	@echo "make demo       the four-minute judge sequence"
+	@echo "make web        run the local web console (upload data/models in a browser)"
 	@echo "make reproduce  regenerate every number and figure from scratch, offline"
 	@echo "make clean      remove generated results"
+
+web:
+	$(PY) -m cvassure.webapp
 
 bootstrap:
 	$(PY) -c "from cvassure.datasets import synth; \

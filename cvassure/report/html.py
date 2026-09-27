@@ -14,6 +14,7 @@ from __future__ import annotations
 import base64
 import datetime as _dt
 import html as _html
+import json
 import mimetypes
 from pathlib import Path
 from typing import Any, Sequence
@@ -37,6 +38,8 @@ h1{font-size:30px;margin:0 0 6px}
 .verdict.red{background:var(--red)}
 .verdict h2{margin:0 0 10px;font-size:34px;letter-spacing:.3px}
 .verdict p{margin:4px 0;font-size:18px}
+.verdict p.verdict-meta{margin-top:14px;font-size:14.5px;opacity:.9}
+.verdict p.verdict-meta strong{font-weight:700}
 section{background:var(--panel);border:1px solid var(--line);border-radius:10px;
   padding:22px 24px;margin:20px 0}
 section > h3{margin:0 0 6px;font-size:21px}
@@ -86,6 +89,8 @@ ul.plain li{margin:5px 0}
   border-radius:0 6px 6px 0;margin:14px 0;font-size:14.5px}
 footer{color:var(--muted);font-size:13px;margin-top:34px;text-align:center}
 code{background:#f0efe9;padding:1px 5px;border-radius:4px;font-size:13px}
+pre.record{background:#f0efe9;border-radius:8px;padding:14px 16px;font-size:13px;
+  overflow-x:auto;white-space:pre-wrap;word-break:break-word}
 @media print{body{background:#fff} section{break-inside:avoid}}
 """
 
@@ -199,6 +204,8 @@ def render(
     plots: dict[str, Any] | None = None,
     calibration_plot: str | Path | None = None,
     audit_log_result=None,
+    summary: dict[str, Any] | None = None,
+    category_risk: Sequence[dict[str, Any]] | None = None,
     max_gallery: int = 12,
     max_findings: int = 400,
 ) -> str:
@@ -206,11 +213,35 @@ def render(
     parts: list[str] = []
 
     # -- verdict -------------------------------------------------------
+    meta_line = ""
+    if summary is not None:
+        bits = [f"Assessment ID <strong>{esc(summary.get('assessment_id', '—'))}</strong>",
+                f"Overall risk <strong>{esc(summary.get('risk', '—'))}</strong>"]
+        if summary.get("confidence") is not None:
+            bits.append(f"Overall confidence <strong>{100 * summary['confidence']:.0f}%</strong>")
+        meta_line = f'<p class="verdict-meta">{" &nbsp;·&nbsp; ".join(bits)}</p>'
     parts.append(
         f'<div class="verdict {esc(verdict.colour)}"><h2>{esc(verdict.headline)}</h2>'
         + "".join(f"<p>{esc(line)}</p>" for line in verdict.lines)
+        + meta_line
         + "</div>"
     )
+
+    # -- training-data risk by category ----------------------------------
+    if category_risk:
+        rows = [
+            [r["category"], r["n_checked"], r["n_flagged"], r["level"], r["status"]]
+            for r in category_risk
+        ]
+        parts.append(
+            _section(
+                "Training-data risk by category",
+                "One row per kind of problem this audit looks for, whether or not this "
+                "batch happened to contain any.",
+                _table(["category", "images checked", "images flagged", "level", "status"],
+                       rows, pill_cols={4}),
+            )
+        )
 
     # -- what was audited ----------------------------------------------
     kv = "".join(
@@ -459,6 +490,17 @@ def render(
                 t.title,
                 " ".join(t.notes),
                 _table(t.columns, rows),
+            )
+        )
+
+    # -- machine-readable record -------------------------------------------
+    if summary is not None:
+        parts.append(
+            _section(
+                "Machine-readable assurance record",
+                "The same verdict, risk and confidence above, as one JSON object for "
+                "downstream systems — not a re-summary written by hand.",
+                f"<pre class='record'>{esc(json.dumps(summary, indent=2, sort_keys=True))}</pre>",
             )
         )
 

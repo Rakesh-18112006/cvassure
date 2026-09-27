@@ -8,11 +8,13 @@ overstate what the system can do.
 
 from __future__ import annotations
 
+import datetime as _dt
+import hashlib
 from collections import defaultdict
 from dataclasses import dataclass, field
 from typing import Any, Sequence
 
-from cvassure.core.schemas import Finding
+from cvassure.core.schemas import Finding, severity_for
 from cvassure.score.tables import Table
 
 #: Which detector answers for which attack, and what a human should call it.
@@ -358,3 +360,167 @@ def overall_verdict(findings: Sequence[Finding], *, n_samples: int = 0) -> Verdi
         # "we were not given what we needed to say".
         return Verdict("NO PROBLEMS FOUND IN WHAT WE COULD CHECK", "amber", lines)
     return Verdict("NO PROBLEMS FOUND", "green", lines)
+
+
+# --------------------------------------------------------------------------
+# The one-page summary: an assessment id, an overall risk word, an overall
+# confidence number, and a single machine-readable record — the rollup layer
+# an analyst skims before reading any of the sections above.
+# --------------------------------------------------------------------------
+
+#: The verdict's traffic-light colour already carries the risk judgement;
+#: this just gives it the word a governance document expects.
+RISK_FOR_COLOUR: dict[str, str] = {"green": "LOW", "amber": "MEDIUM", "red": "HIGH"}
+
+
+def overall_risk(verdict: Verdict) -> str:
+    return RISK_FOR_COLOUR.get(verdict.colour, "MEDIUM")
+
+
+def make_assessment_id(seed: str, *, when: _dt.datetime | None = None) -> str:
+    """A short, stable id for one run, derived from it rather than a counter.
+
+    Two audits of the same input at the same moment would collide on a
+    counter kept only in memory; hashing the seed (a run id, or the run's
+    input digests) makes the id reproducible instead of merely unique.
+    """
+    when = when or _dt.datetime.now(_dt.timezone.utc)
+    digest = hashlib.sha256(seed.encode("utf-8")).hexdigest()[:6].upper()
+    return f"CVA-{when.strftime('%Y%m%d')}-{digest}"
+
+
+def overall_confidence(findings: Sequence[Finding]) -> float | None:
+    """The average confidence across every check that actually stated one.
+
+    Not every detector can: a hash comparison is binary and a statistical
+    shape argument is not, so ``Finding.confidence`` is often ``None``. This
+    returns ``None`` rather than a number when nothing here reported one —
+    a single invented aggregate would be exactly the kind of overstatement
+    this system exists to avoid.
+    """
+    values = [
+        f.confidence for f in findings
+        if not f.is_unavailable and f.confidence is not None
+    ]
+    return float(sum(values) / len(values)) if values else None
+
+
+#: Attack classes grouped the way an analyst thinks about training-data risk,
+#: rather than by which detector happens to answer for them.
+DATA_RISK_CATEGORIES: dict[str, tuple[str, ...]] = {
+    "trigger_pattern": ("badnets_patch", "blended_trigger"),
+    "label_anomaly": ("label_flip", "systematic_mislabel"),
+    "duplicate_flood": ("near_duplicate_flood",),
+    "ood_distribution": ("ood_insertion",),
+}
+
+DATA_RISK_LABELS: dict[str, str] = {
+    "trigger_pattern": "Trigger / pattern risk",
+    "label_anomaly": "Label anomaly risk",
+    "duplicate_flood": "Duplicate / near-duplicate risk",
+    "ood_distribution": "OOD / distribution risk",
+}
+
+
+def data_category_risk(findings: Sequence[Finding]) -> list[dict[str, Any]]:
+    """Roll sample-level findings up into the four risk categories an
+    operational report groups training-data problems into.
+
+    ``level`` is the qualitative read (low/medium/high/critical) of the worst
+    score seen in that category this run; ``status`` is the disposition an
+    analyst would act on. A category with no matching samples in this run
+    reports zero findings rather than being omitted, so the table always
+    answers "did we look" as well as "what did we find".
+    """
+    samples = [f for f in findings if f.asset_type == "sample" and not f.is_unavailable]
+    out = []
+    for key, classes in DATA_RISK_CATEGORIES.items():
+        members = [f for f in samples if f.attack_class in classes]
+        flagged = [f for f in members if f.disposition != "accept"]
+        top_score = max((f.score for f in members), default=0.0)
+        status = (
+            "quarantine" if any(f.disposition == "quarantine" for f in flagged)
+            else "review" if flagged
+            else "accept"
+        )
+        out.append(
+            {
+                "category": DATA_RISK_LABELS[key],
+                "n_checked": len(members),
+                "n_flagged": len(flagged),
+                "level": severity_for(top_score) if members else "low",
+                "status": status,
+            }
+        )
+    return out
+
+
+def _worst_disposition(items: Sequence[Finding]) -> str:
+    order = {"accept": 0, "review": 1, "quarantine": 2}
+    worst = "accept"
+    for f in items:
+        if not f.is_unavailable and order.get(f.disposition, 0) > order.get(worst, 0):
+            worst = f.disposition
+    return worst
+
+
+def assurance_record(
+    *,
+    assessment_id: str,
+    verdict: Verdict,
+    findings: Sequence[Finding],
+    dataset_summary: dict[str, Any] | None = None,
+    model_info: dict[str, Any] | None = None,
+    receipts_result: dict[str, Any] | None = None,
+    limitations: Sequence[str] = (),
+) -> dict[str, Any]:
+    """The single, consolidated machine-readable record for one run.
+
+    Everywhere else in cvassure deliberately keeps findings as a flat list —
+    that is what lets a scoring harness and an HTML report both consume it
+    without agreeing on anything else. This is the one place that rolls that
+    list up into the shape a downstream system integration actually wants:
+    one object, one verdict, one risk word, one confidence number.
+    """
+    samples = [f for f in findings if f.asset_type == "sample"]
+    models = [f for f in findings if f.asset_type == "model"]
+    receipts = [f for f in findings if f.asset_type == "receipt"]
+    contributors = {
+        f.asset_ref: f.disposition
+        for f in findings
+        if f.asset_type == "contributor"
+        and not f.is_unavailable
+        and not str(f.asset_ref).startswith("batch:")
+    }
+
+    record: dict[str, Any] = {
+        "assessment_id": assessment_id,
+        "verdict": verdict.headline,
+        "risk": overall_risk(verdict),
+        "confidence": overall_confidence(findings),
+    }
+    if dataset_summary is not None:
+        record["dataset"] = {
+            "status": _worst_disposition(samples),
+            "n_samples": dataset_summary.get("n_samples"),
+            "n_flagged": sum(
+                1 for f in samples if not f.is_unavailable and f.disposition != "accept"
+            ),
+        }
+    if model_info is not None:
+        record["model"] = {
+            "status": _worst_disposition(models),
+            "kind": model_info.get("kind"),
+            "access_tier": model_info.get("declared_access_tier"),
+        }
+    if receipts_result is not None:
+        record["inference"] = {
+            "status": _worst_disposition(receipts),
+            "total": receipts_result.get("total"),
+            "tampered_records": len(receipts_result.get("failures", [])),
+        }
+    if contributors:
+        record["contributors"] = contributors
+    record["limitations"] = list(limitations)
+    record["recommendation"] = verdict.lines[0] if verdict.lines else verdict.headline
+    return record

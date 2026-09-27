@@ -10,10 +10,12 @@ requires-python = ">=3.11"
 dependencies = [
   "numpy", "scipy", "pillow", "scikit-learn", "matplotlib",
   "onnxruntime", "torch", "cryptography", "ImageHash", "pyyaml", "jinja2",
+  "flask",
 ]
 
 [project.scripts]
 cvassure = "cvassure.cli:main"
+cvassure-web = "cvassure.webapp:main"
 
 [tool.setuptools.packages.find]
 include = ["cvassure*"]
