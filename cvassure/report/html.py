@@ -357,6 +357,19 @@ def render(
             )
         )
 
+    # -- chain of custody -------------------------------------------------
+    custody = [f for f in findings if f.asset_type == "custody"]
+    if custody:
+        rows = [[f.asset_ref, f.disposition, f.reason] for f in custody]
+        parts.append(
+            _section(
+                "Did every organisation hand this on honestly?",
+                "Each hop is signed by the organisation that made it, and must declare "
+                "receiving exactly what the organisation before it signed off on producing.",
+                _table(["hop", "result", "what we found"], rows, pill_cols={1}),
+            )
+        )
+
     # -- distribution shift ---------------------------------------------
     shift = [f for f in findings if f.detector_id == "shift"]
     if shift:

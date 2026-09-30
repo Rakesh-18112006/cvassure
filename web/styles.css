@@ -310,6 +310,60 @@ body.sidebar-collapsed .brand {
 .dropzone.has-file .dropzone-hint {
   color: #37894e;
 }
+.upload-block {
+  margin-bottom: 14px;
+}
+.upload-block .dropzone {
+  margin-bottom: 0;
+}
+.path-field {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 6px;
+  font: 10px "SFMono-Regular", Consolas, monospace;
+  color: var(--muted);
+}
+.path-field span {
+  white-space: nowrap;
+  flex: none;
+}
+.path-field input {
+  flex: 1;
+  min-width: 0;
+  border: 1px solid var(--line);
+  background: var(--paper);
+  padding: 7px 9px;
+  font: 11px "SFMono-Regular", Consolas, monospace;
+  color: var(--ink);
+}
+.fixture-chips {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin-top: 8px;
+}
+.fixture-chips span {
+  font: 10px "SFMono-Regular", Consolas, monospace;
+  color: var(--muted);
+  margin-right: 2px;
+}
+.fixture-chip {
+  border: 1px solid var(--line);
+  background: var(--cream);
+  padding: 5px 9px;
+  font-size: 11px;
+  border-radius: 999px;
+}
+.fixture-chip:hover {
+  border-color: var(--ink);
+}
+.fixture-chip.active {
+  background: var(--ink);
+  border-color: var(--ink);
+  color: var(--lime);
+}
 .text-field {
   display: flex;
   flex-direction: column;
@@ -339,6 +393,33 @@ body.sidebar-collapsed .brand {
   display: block;
   font-size: 12.5px;
   padding: 5px 0;
+}
+.checkbox-field {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12.5px;
+  color: var(--muted);
+  margin: -6px 0 16px;
+}
+.checkbox-field input {
+  width: 15px;
+  height: 15px;
+  flex: none;
+}
+.pem-box {
+  width: 100%;
+  border: 1px solid var(--line);
+  background: var(--ink);
+  color: var(--lime);
+  padding: 10px;
+  font: 11px "SFMono-Regular", Consolas, monospace;
+  resize: vertical;
+}
+.pem-actions {
+  display: flex;
+  gap: 16px;
+  margin-top: 4px;
 }
 .primary-button {
   border: 0;

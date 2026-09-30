@@ -12,14 +12,14 @@ import uuid
 from dataclasses import asdict, dataclass, field, replace
 from typing import Any, Literal
 
-AssetType = Literal["sample", "contributor", "model", "receipt", "dataset"]
+AssetType = Literal["sample", "contributor", "model", "receipt", "dataset", "custody"]
 Severity = Literal["low", "medium", "high", "critical"]
 Disposition = Literal["accept", "review", "quarantine"]
 AccessTier = Literal[0, 1, 2]
 
 SEVERITIES: tuple[str, ...] = ("low", "medium", "high", "critical")
 DISPOSITIONS: tuple[str, ...] = ("accept", "review", "quarantine")
-ASSET_TYPES: tuple[str, ...] = ("sample", "contributor", "model", "receipt", "dataset")
+ASSET_TYPES: tuple[str, ...] = ("sample", "contributor", "model", "receipt", "dataset", "custody")
 
 #: Attack classes the system knows about. Ground truth and findings join on
 #: these strings, so they are defined once, here.
@@ -39,6 +39,9 @@ ATTACK_CLASSES: tuple[str, ...] = (
     "receipt_delete",
     "receipt_reorder",
     "distribution_shift",
+    "custody_substitution",
+    "custody_unknown_actor",
+    "custody_break",
 )
 
 # --------------------------------------------------------------------------

@@ -30,6 +30,7 @@ from cvassure.detect.base import AuditContext
 from cvassure.detect.embed import EmbeddingStore
 from cvassure.ingest.dataset import Dataset, detect_format, load_dataset
 from cvassure.ingest.models import UnusableModel, load_model
+from cvassure.provenance import custody
 from cvassure.report import build as report_build
 from cvassure.report import html as report_html
 
@@ -38,8 +39,45 @@ WEB_DIR = REPO_ROOT / "web"
 RUNS_ROOT = REPO_ROOT / "results" / "web_runs"
 SWEEP_PATH = REPO_ROOT / "results" / "sweep_raw.jsonl"
 DEFAULT_PUBKEY = REPO_ROOT / "keys" / "pub.pem"
+#: Organisation identities persist here, separate from timestamped run
+#: directories — an actor's keypair is a long-lived identity, not one audit.
+CUSTODY_KEYS_DIR = REPO_ROOT / "results" / "web_runs" / "_custody_actors"
 
-MODULES = ("data", "model", "receipts")
+MODULES = ("data", "model", "receipts", "custody")
+
+#: Curated sample files already sitting on disk, offered as one-click
+#: quick-picks so testing never depends on dragging a file out of Downloads.
+#: An entry whose file is missing (e.g. `make demo` was never run) is simply
+#: left out by /api/fixtures rather than shown as a broken button.
+FIXTURES: dict[str, list[dict[str, str]]] = {
+    "data": [
+        {"label": "Clean dataset", "path": "data/synth10", "field": "dataset"},
+        {"label": "4 attacks planted at once", "path": "results/demo_fixtures/poisoned_dataset_4attacks.zip", "field": "dataset"},
+        {"label": "4 attacks, different batch", "path": "results/demo_fixtures/poisoned_dataset_variant2.zip", "field": "dataset"},
+        {"label": "make demo's poisoned set", "path": "results/demo/poisoned", "field": "dataset"},
+        {"label": "make demo's clean set", "path": "results/demo/clean", "field": "dataset"},
+    ],
+    "model": [
+        {"label": "Genuine vendor model", "path": "models/vendor.pt", "field": "model"},
+        {"label": "Backdoored model", "path": "results/demo_fixtures/poisoned_model_backdoor.pt", "field": "model"},
+        {"label": "Weights quietly edited", "path": "results/demo_fixtures/poisoned_model_perturbed.pt", "field": "model"},
+        {"label": "make demo's substituted model", "path": "results/demo/swapped/vendor.onnx", "field": "model"},
+        {"label": "Enrolled fingerprint for vendor.pt", "path": "results/demo_fixtures/enrolled_vendor_fingerprint.json", "field": "enrolled_fingerprint"},
+        {"label": "Dataset for activation-based checks", "path": "data/synth10", "field": "dataset"},
+    ],
+    "receipts": [
+        {"label": "Tampered inference log", "path": "results/demo/tampered.jsonl", "field": "receipts"},
+        {"label": "Its public key", "path": "results/demo/keys/pub.pem", "field": "pubkey"},
+    ],
+    "custody": [
+        {"label": "Clean 3-hop chain", "path": "results/demo_fixtures/custody/custody_chain_clean.jsonl", "field": "chain"},
+        {"label": "Edited after signing", "path": "results/demo_fixtures/custody/custody_chain_edited_after_signing.jsonl", "field": "chain"},
+        {"label": "Substituted handoff", "path": "results/demo_fixtures/custody/custody_chain_substituted_handoff.jsonl", "field": "chain"},
+        {"label": "Actors keyring", "path": "results/demo_fixtures/custody/custody_actors_keyring.json", "field": "keyring"},
+        {"label": "Clean dataset to certify", "path": "data/synth10", "field": "dataset"},
+        {"label": "Genuine vendor model to certify", "path": "models/vendor.pt", "field": "model"},
+    ],
+}
 
 
 # --------------------------------------------------------------------------
@@ -65,6 +103,40 @@ def _save_upload(field: str, dest: Path) -> Path | None:
     return path
 
 
+def _resolve_local_path(raw: str | None) -> Path | None:
+    """A path the uploader typed instead of browsing to a file — this app and
+    its browser always run on the same machine, so reading a path directly is
+    exactly as local as an upload, just without the copy."""
+    if not raw or not raw.strip():
+        return None
+    p = Path(raw.strip()).expanduser()
+    if not p.is_absolute():
+        p = REPO_ROOT / p
+    if not p.exists():
+        raise FileNotFoundError(f"nothing on this machine at '{raw}'")
+    return p
+
+
+def _resolve_file_source(field: str, run_dir: Path) -> Path | None:
+    """An uploaded file for ``field``, or — if nothing was uploaded — a path
+    typed into ``<field>_path``. Whichever was actually given."""
+    upload = _save_upload(field, run_dir / "uploads")
+    if upload is not None:
+        return upload
+    return _resolve_local_path(request.form.get(f"{field}_path"))
+
+
+def _resolve_dataset_source(field: str, run_dir: Path) -> Path | None:
+    """Like :func:`_resolve_file_source`, but a `.zip` is unpacked — from an
+    upload or from a path — while a folder already on disk is used as-is."""
+    source = _resolve_file_source(field, run_dir)
+    if source is None:
+        return None
+    if source.is_file() and source.suffix.lower() == ".zip":
+        return _extract_dataset_zip(source, run_dir / "dataset")
+    return source
+
+
 def _extract_dataset_zip(zip_path: Path, dest: Path) -> Path:
     """Unzip and find the actual dataset root, tolerating one wrapping folder."""
     with zipfile.ZipFile(zip_path) as zf:
@@ -86,6 +158,31 @@ def _extract_dataset_zip(zip_path: Path, dest: Path) -> Path:
         "(one subfolder per class), a COCO instances JSON + images, or a YOLO "
         "data.yaml + labels/ folder."
     )
+
+
+def _custody_output_digest(
+    *, dataset_source: Path | None, model_path: Path | None,
+    explicit: str | None, images_only: bool,
+) -> str:
+    """What a custody hop actually signs off on: the real content hash of
+    whatever was given — uploaded or a local path — computed the same way the
+    CLI computes it, never typed in by hand unless nothing else was given."""
+    if explicit:
+        return explicit
+    if dataset_source is not None:
+        dataset = load_dataset(dataset_source)
+        return custody.dataset_content_digest(dataset.samples, include_labels=not images_only)
+    if model_path is not None:
+        from cvassure.detect.fingerprint import compute_fingerprint
+        from cvassure.detect.weight_digest import canonical_weight_digest
+        from cvassure.ingest.models import AccessDenied
+
+        model = load_model(model_path, access_tier=1)
+        try:
+            return canonical_weight_digest(model.weights())
+        except AccessDenied:
+            return compute_fingerprint(model)["digest"]
+    raise ValueError("attach a dataset .zip, a model file, or type a digest directly")
 
 
 def _finding_to_json(f: Finding) -> dict[str, Any]:
@@ -206,20 +303,31 @@ def create_app() -> Flask:
     def health():
         return jsonify({"ok": True, "offline": True})
 
+    @app.get("/api/fixtures")
+    def fixtures():
+        """Sample files already on this machine, so testing never depends on
+        finding something to drag out of Downloads."""
+        out: dict[str, list[dict[str, str]]] = {}
+        for module, entries in FIXTURES.items():
+            available = [e for e in entries if (REPO_ROOT / e["path"]).exists()]
+            if available:
+                out[module] = available
+        return jsonify(out)
+
     # -- data integrity -----------------------------------------------------
 
     @app.post("/api/data/runs")
     def data_run():
         run_id, run_dir = _new_run_dir("data")
         try:
-            zip_path = _save_upload("dataset", run_dir / "uploads")
-            if zip_path is None:
-                return jsonify({"error": "attach a dataset .zip (ImageFolder / COCO / YOLO)"}), 400
+            root = _resolve_dataset_source("dataset", run_dir)
+            if root is None:
+                return jsonify({
+                    "error": "attach a dataset .zip (ImageFolder / COCO / YOLO), or give a "
+                             "path to one already on this machine",
+                }), 400
 
-            dataset_dir = run_dir / "dataset"
-            root = _extract_dataset_zip(zip_path, dataset_dir)
-
-            contributors_path = _save_upload("contributors", run_dir / "uploads")
+            contributors_path = _resolve_file_source("contributors", run_dir)
             contributor_from_path = request.form.get("contributor_from_path") or None
 
             dataset: Dataset = load_dataset(
@@ -316,9 +424,11 @@ def create_app() -> Flask:
     def model_run():
         run_id, run_dir = _new_run_dir("model")
         try:
-            model_path = _save_upload("model", run_dir / "uploads")
+            model_path = _resolve_file_source("model", run_dir)
             if model_path is None:
-                return jsonify({"error": "attach a model file (.onnx, .pt, .pth)"}), 400
+                return jsonify({
+                    "error": "attach a model file (.onnx, .pt, .pth), or give a path to one",
+                }), 400
 
             access_tier = int(request.form.get("access_tier", 0))
             if access_tier not in (0, 1, 2):
@@ -331,15 +441,14 @@ def create_app() -> Flask:
 
             samples = []
             dataset_summary = None
-            zip_path = _save_upload("dataset", run_dir / "uploads")
-            if zip_path is not None:
-                root = _extract_dataset_zip(zip_path, run_dir / "dataset")
-                dataset = load_dataset(root)
+            dataset_root = _resolve_dataset_source("dataset", run_dir)
+            if dataset_root is not None:
+                dataset = load_dataset(dataset_root)
                 samples = dataset.samples
                 dataset_summary = dataset.summary()
 
             enrolled = None
-            fp_path = _save_upload("enrolled_fingerprint", run_dir / "uploads")
+            fp_path = _resolve_file_source("enrolled_fingerprint", run_dir)
             if fp_path is not None:
                 enrolled = json.loads(fp_path.read_text(encoding="utf-8"))
 
@@ -425,9 +534,11 @@ def create_app() -> Flask:
     def model_enroll():
         run_id, run_dir = _new_run_dir("enroll")
         try:
-            model_path = _save_upload("model", run_dir / "uploads")
+            model_path = _resolve_file_source("model", run_dir)
             if model_path is None:
-                return jsonify({"error": "attach a model file (.onnx, .pt, .pth)"}), 400
+                return jsonify({
+                    "error": "attach a model file (.onnx, .pt, .pth), or give a path to one",
+                }), 400
             access_tier = int(request.form.get("access_tier", 2))
             try:
                 model = load_model(model_path, access_tier)
@@ -450,11 +561,11 @@ def create_app() -> Flask:
             from cvassure.provenance.receipts import load_public_key, read_receipts
             from cvassure.provenance.verify import findings_from_result, verify_log
 
-            receipts_path = _save_upload("receipts", run_dir / "uploads")
+            receipts_path = _resolve_file_source("receipts", run_dir)
             if receipts_path is None:
-                return jsonify({"error": "attach a receipts .jsonl file"}), 400
+                return jsonify({"error": "attach a receipts .jsonl file, or give a path to one"}), 400
 
-            pubkey_path = _save_upload("pubkey", run_dir / "uploads")
+            pubkey_path = _resolve_file_source("pubkey", run_dir)
             if pubkey_path is None:
                 if not DEFAULT_PUBKEY.exists():
                     return jsonify({
@@ -523,6 +634,185 @@ def create_app() -> Flask:
             "findings": _read_findings(run_dir),
             "assurance_record": _read_assurance_record(run_dir),
         })
+
+    # -- chain of custody -------------------------------------------------------
+
+    @app.post("/api/custody/actors")
+    def custody_create_actor():
+        actor_id = secure_filename((request.form.get("actor_id") or "").strip())
+        if not actor_id:
+            return jsonify({"error": "give this organisation an id (letters, numbers, - or _)"}), 400
+        actor_dir = CUSTODY_KEYS_DIR / actor_id
+        if actor_dir.exists():
+            return jsonify({
+                "error": f"'{actor_id}' is already registered on this machine. Pick a "
+                         f"different id, or use the existing one from the list below.",
+            }), 400
+        try:
+            priv, pub = custody.init_actor_keys(actor_dir)
+            return jsonify({
+                "actor_id": actor_id,
+                "public_key_pem": pub.read_text(encoding="utf-8"),
+                "private_key_pem": priv.read_text(encoding="utf-8"),
+            })
+        except Exception as exc:  # noqa: BLE001
+            shutil.rmtree(actor_dir, ignore_errors=True)
+            return jsonify({"error": str(exc)}), 400
+
+    @app.get("/api/custody/actors")
+    def custody_list_actors():
+        if not CUSTODY_KEYS_DIR.exists():
+            return jsonify([])
+        out = []
+        for sub in sorted(CUSTODY_KEYS_DIR.iterdir()):
+            pub = sub / "pub.pem"
+            if sub.is_dir() and pub.exists():
+                out.append({"actor_id": sub.name, "public_key_pem": pub.read_text(encoding="utf-8")})
+        return jsonify(out)
+
+    @app.post("/api/custody/hops")
+    def custody_add_hop():
+        run_id, run_dir = _new_run_dir("custody")
+        try:
+            actor_id = (request.form.get("actor_id") or "").strip()
+            stage = (request.form.get("stage") or "").strip()
+            description = (request.form.get("description") or "").strip()
+            if not actor_id or not stage or not description:
+                return jsonify({"error": "actor id, stage and a description are all required"}), 400
+
+            key_path = _resolve_file_source("actor_key", run_dir)
+            if key_path is None:
+                registered = CUSTODY_KEYS_DIR / secure_filename(actor_id) / "priv.pem"
+                if not registered.exists():
+                    return jsonify({
+                        "error": f"'{actor_id}' is not a registered organisation on this "
+                                 f"machine, and no private key was attached. Register it on "
+                                 f"the Actors tab first, or attach its priv.pem.",
+                    }), 400
+                key_path = registered
+            private_key = custody.load_private_key(key_path)
+
+            chain_path = _resolve_file_source("chain", run_dir)
+            chain = custody.CustodyChain.from_file(chain_path) if chain_path else custody.CustodyChain()
+
+            dataset_source = _resolve_dataset_source("dataset", run_dir)
+            model_path = _resolve_file_source("model", run_dir)
+            output_digest = _custody_output_digest(
+                dataset_source=dataset_source, model_path=model_path,
+                explicit=request.form.get("output_digest") or None,
+                images_only=request.form.get("images_only") == "true",
+            )
+
+            record = chain.add_hop(
+                stage=stage, actor_id=actor_id, output_digest=output_digest,
+                description=description, private_key=private_key,
+            )
+            chain.write(run_dir / "chain.jsonl")
+
+            meta = {
+                "id": run_id,
+                "module": "custody",
+                "kind": "hop",
+                "created": _dt.datetime.now().isoformat(timespec="seconds"),
+                "hop": record.hop,
+                "stage": stage,
+                "actor_id": actor_id,
+                "description": description,
+                "output_digest": output_digest,
+                "n_hops": len(chain.records),
+            }
+            _write_meta(run_dir, meta)
+            return jsonify({
+                **meta,
+                "chain": [r.to_dict() for r in chain.records],
+            })
+        except Exception as exc:  # noqa: BLE001
+            shutil.rmtree(run_dir, ignore_errors=True)
+            return jsonify({"error": str(exc)}), 400
+
+    @app.get("/api/custody/runs/<run_id>/chain.jsonl")
+    def custody_chain_file(run_id: str):
+        run_dir = _run_dir_or_404("custody", run_id)
+        if run_dir is None or not (run_dir / "chain.jsonl").exists():
+            return jsonify({"error": "no chain for this run"}), 404
+        return send_file(run_dir / "chain.jsonl")
+
+    @app.post("/api/custody/verify")
+    def custody_verify():
+        run_id, run_dir = _new_run_dir("custody")
+        try:
+            chain_path = _resolve_file_source("chain", run_dir)
+            if chain_path is None:
+                return jsonify({"error": "attach a chain .jsonl file, or give a path to one"}), 400
+
+            keyring = custody.load_keyring_dir(CUSTODY_KEYS_DIR)
+            keyring_path = _resolve_file_source("keyring", run_dir)
+            if keyring_path is not None:
+                keyring.update(custody.load_keyring_json(keyring_path))
+
+            records = custody.read_custody_chain(chain_path)
+            result = custody.verify_custody_chain(records, keyring)
+            findings = custody.findings_from_custody_result(result)
+            _write_findings(run_dir, findings)
+
+            verdict_obj = _compute_verdict(findings, n_samples=result.total)
+            assessment_id = report_build.make_assessment_id(run_id)
+            result_dict = result.to_dict()
+            record = report_build.assurance_record(
+                assessment_id=assessment_id, verdict=verdict_obj, findings=findings,
+                custody_result=result_dict,
+            )
+            meta = {
+                "id": run_id,
+                "module": "custody",
+                "kind": "verify",
+                "created": _dt.datetime.now().isoformat(timespec="seconds"),
+                "assessment_id": assessment_id,
+                "result": result_dict,
+                "verdict": _verdict_dict(verdict_obj),
+                "risk": report_build.overall_risk(verdict_obj),
+                "confidence": report_build.overall_confidence(findings),
+                "n_findings": len(findings),
+                "known_actors": sorted(keyring),
+            }
+            _write_meta(run_dir, meta)
+            _write_assurance_record(run_dir, record)
+            _build_html_report(
+                run_dir, findings,
+                inputs={
+                    "Chain of custody": f"{chain_path.name} ({result.total} hops)",
+                    "Organisations recognised": ", ".join(sorted(keyring)) or "none",
+                    "Network access": "none — this run stayed on this machine",
+                },
+                access_tier=0, verdict=verdict_obj, summary=record,
+            )
+
+            return jsonify({
+                **meta,
+                "records": records,
+                "findings": [_finding_to_json(f) for f in findings],
+                "assurance_record": record,
+            })
+        except Exception as exc:  # noqa: BLE001
+            shutil.rmtree(run_dir, ignore_errors=True)
+            return jsonify({"error": str(exc)}), 400
+
+    @app.get("/api/custody/runs")
+    def custody_runs():
+        return jsonify(_list_runs("custody"))
+
+    @app.get("/api/custody/runs/<run_id>")
+    def custody_run_detail(run_id: str):
+        run_dir = _run_dir_or_404("custody", run_id)
+        if run_dir is None:
+            return jsonify({"error": "no such run"}), 404
+        meta = json.loads((run_dir / "meta.json").read_text(encoding="utf-8"))
+        extra: dict[str, Any] = {"assurance_record": _read_assurance_record(run_dir)}
+        if meta.get("kind") == "hop" and (run_dir / "chain.jsonl").exists():
+            extra["chain"] = custody.read_custody_chain(run_dir / "chain.jsonl")
+        else:
+            extra["findings"] = _read_findings(run_dir)
+        return jsonify({**meta, **extra})
 
     # -- reports (across every module) ----------------------------------------
 

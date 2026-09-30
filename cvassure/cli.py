@@ -43,6 +43,73 @@ def _cmd_provenance_verify(args: argparse.Namespace) -> int:
 
 
 # --------------------------------------------------------------------------
+# custody — a signed handoff log for a dataset or model, one hop per
+# organisation, distinct from the single-signer inference-receipt chain above
+# --------------------------------------------------------------------------
+
+
+def _cmd_custody_init_actor(args: argparse.Namespace) -> int:
+    from cvassure.provenance.custody import init_actor_keys
+
+    priv, pub = init_actor_keys(args.out, overwrite=args.overwrite)
+    print(f"Private key: {priv}  (this organisation keeps it secret)")
+    print(f"Public key:  {pub}   (share this so others can verify this organisation's hops)")
+    return 0
+
+
+def _hop_output_digest(args: argparse.Namespace) -> str:
+    if args.output_digest:
+        return args.output_digest
+    if args.dataset:
+        from cvassure.ingest.dataset import load_dataset
+        from cvassure.provenance.custody import dataset_content_digest
+
+        dataset = load_dataset(args.dataset)
+        return dataset_content_digest(dataset.samples, include_labels=not args.images_only)
+    if args.model:
+        from cvassure.detect.fingerprint import compute_fingerprint
+        from cvassure.detect.weight_digest import canonical_weight_digest
+        from cvassure.ingest.models import AccessDenied, load_model
+
+        model = load_model(args.model, access_tier=1)
+        try:
+            return canonical_weight_digest(model.weights())
+        except AccessDenied:
+            return compute_fingerprint(model)["digest"]
+    raise SystemExit("custody add-hop needs one of --dataset, --model or --output-digest")
+
+
+def _cmd_custody_add_hop(args: argparse.Namespace) -> int:
+    from cvassure.provenance.custody import CustodyChain, load_private_key
+
+    chain = CustodyChain.from_file(args.chain) if Path(args.chain).exists() else CustodyChain()
+    record = chain.add_hop(
+        stage=args.stage,
+        actor_id=args.actor_id,
+        output_digest=_hop_output_digest(args),
+        description=args.description,
+        private_key=load_private_key(args.key),
+    )
+    chain.write(args.chain)
+    print(f"Hop {record.hop} ({args.stage}, signed by {args.actor_id}) appended -> {args.chain}")
+    print(f"Output digest: {record.output_digest}")
+    return 0
+
+
+def _cmd_custody_verify(args: argparse.Namespace) -> int:
+    from cvassure.provenance.custody import (
+        load_keyring_dir,
+        load_keyring_json,
+        verify_custody_file,
+    )
+
+    keyring = load_keyring_json(args.keyring) if args.keyring else load_keyring_dir(args.keys_dir)
+    result = verify_custody_file(args.chain, keyring)
+    print(result.render())
+    return 0 if result.ok else 1
+
+
+# --------------------------------------------------------------------------
 # ingest
 # --------------------------------------------------------------------------
 
@@ -152,6 +219,44 @@ def build_parser() -> argparse.ArgumentParser:
     vf.add_argument("--receipts", required=True)
     vf.add_argument("--pubkey", default="keys/pub.pem")
     vf.set_defaults(func=_cmd_provenance_verify)
+
+    # -- custody -----------------------------------------------------------
+    cus = sub.add_parser(
+        "custody", help="sign and verify a cross-organisation chain of custody"
+    )
+    cus_sub = cus.add_subparsers(dest="subcommand", required=True)
+
+    cik = cus_sub.add_parser(
+        "init-actor", help="generate an Ed25519 keypair for one organisation"
+    )
+    cik.add_argument("--out", required=True, help="directory to write this actor's priv.pem/pub.pem")
+    cik.add_argument("--overwrite", action="store_true")
+    cik.set_defaults(func=_cmd_custody_init_actor)
+
+    cah = cus_sub.add_parser(
+        "add-hop", help="append one organisation's signed hop to a custody chain"
+    )
+    cah.add_argument("--chain", required=True, help="the chain .jsonl file; created if absent")
+    cah.add_argument("--stage", required=True,
+                     help="e.g. data_collection, labelling, training, deployment")
+    cah.add_argument("--actor-id", required=True, help="who is signing this hop")
+    cah.add_argument("--key", required=True, help="this actor's priv.pem")
+    cah.add_argument("--description", required=True, help="one plain-English sentence")
+    cah.add_argument("--dataset", help="compute the output digest from a dataset")
+    cah.add_argument("--model", help="compute the output digest from a model file")
+    cah.add_argument("--output-digest", help="or supply the digest directly")
+    cah.add_argument("--images-only", action="store_true",
+                     help="with --dataset, digest the images without their labels — what a "
+                          "data-collection hop should sign, before anyone has labelled them")
+    cah.set_defaults(func=_cmd_custody_add_hop)
+
+    cvf = cus_sub.add_parser(
+        "verify", help="check every hop's signature and every handoff in the chain"
+    )
+    cvf.add_argument("--chain", required=True)
+    cvf.add_argument("--keys-dir", help="directory of <actor_id>/pub.pem")
+    cvf.add_argument("--keyring", help="or one {actor_id: pem} JSON file")
+    cvf.set_defaults(func=_cmd_custody_verify)
 
     # -- ingest ----------------------------------------------------------
     ing = sub.add_parser("ingest", help="load datasets and models")

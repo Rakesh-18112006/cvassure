@@ -33,6 +33,9 @@ ATTACK_LABELS: dict[str, str] = {
     "receipt_delete": "An inference record was removed",
     "receipt_reorder": "The inference records were shuffled",
     "distribution_shift": "The incoming data has drifted from normal",
+    "custody_substitution": "Something was swapped in transit between two organisations",
+    "custody_unknown_actor": "An organisation with no registered key signed a handoff",
+    "custody_break": "The chain-of-custody log itself was edited or rewritten",
 }
 
 SUPPORTED = "supported"
@@ -285,6 +288,7 @@ def overall_verdict(findings: Sequence[Finding], *, n_samples: int = 0) -> Verdi
     contributors = [f for f in findings if f.asset_type == "contributor" and not f.is_unavailable]
     models = [f for f in findings if f.asset_type == "model" and not f.is_unavailable]
     receipts = [f for f in findings if f.asset_type == "receipt" and not f.is_unavailable]
+    custody = [f for f in findings if f.asset_type == "custody" and not f.is_unavailable]
 
     # A check that could not run is not a check that passed. Keeping the blocked
     # model findings lets the headline say "we did not look" instead of
@@ -296,6 +300,7 @@ def overall_verdict(findings: Sequence[Finding], *, n_samples: int = 0) -> Verdi
     model_bad = [f for f in models if f.disposition == "quarantine"]
     model_review = [f for f in models if f.disposition == "review"]
     receipt_bad = [f for f in receipts if f.disposition == "quarantine"]
+    custody_bad = [f for f in custody if f.disposition == "quarantine"]
 
     lines: list[str] = []
     if contributors:
@@ -351,7 +356,24 @@ def overall_verdict(findings: Sequence[Finding], *, n_samples: int = 0) -> Verdi
         else:
             lines.append(f"Inference log: all {total} records verified.")
 
-    if quarantined or model_bad or receipt_bad:
+    if custody:
+        n_bad = len(custody_bad)
+        total = max(
+            (int(f.evidence.get("total", 0)) for f in custody if "total" in f.evidence),
+            default=0,
+        )
+        if n_bad:
+            which = ", ".join(
+                f"hop {f.evidence.get('hop')}" for f in custody_bad[:3] if f.evidence.get("hop")
+            )
+            lines.append(
+                f"Chain of custody: {n_bad} hop{'s' if n_bad > 1 else ''} broke the chain"
+                + (f" ({which})." if which else ".")
+            )
+        else:
+            lines.append(f"Chain of custody: all {total} hops verified.")
+
+    if quarantined or model_bad or receipt_bad or custody_bad:
         return Verdict("QUARANTINE RECOMMENDED", "red", lines)
     if review or model_review:
         return Verdict("REVIEW BEFORE USE", "amber", lines)
@@ -472,6 +494,7 @@ def assurance_record(
     dataset_summary: dict[str, Any] | None = None,
     model_info: dict[str, Any] | None = None,
     receipts_result: dict[str, Any] | None = None,
+    custody_result: dict[str, Any] | None = None,
     limitations: Sequence[str] = (),
 ) -> dict[str, Any]:
     """The single, consolidated machine-readable record for one run.
@@ -485,6 +508,7 @@ def assurance_record(
     samples = [f for f in findings if f.asset_type == "sample"]
     models = [f for f in findings if f.asset_type == "model"]
     receipts = [f for f in findings if f.asset_type == "receipt"]
+    custody = [f for f in findings if f.asset_type == "custody"]
     contributors = {
         f.asset_ref: f.disposition
         for f in findings
@@ -518,6 +542,12 @@ def assurance_record(
             "status": _worst_disposition(receipts),
             "total": receipts_result.get("total"),
             "tampered_records": len(receipts_result.get("failures", [])),
+        }
+    if custody_result is not None:
+        record["custody"] = {
+            "status": _worst_disposition(custody),
+            "total_hops": custody_result.get("total"),
+            "broken_hops": len(custody_result.get("failures", [])),
         }
     if contributors:
         record["contributors"] = contributors
